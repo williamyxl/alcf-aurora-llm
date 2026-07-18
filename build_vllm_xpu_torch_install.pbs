@@ -1,0 +1,49 @@
+#!/bin/bash -l
+# Phase 2b: install existing torch wheel into $ENV and verify XPU on compute.
+# Skips rebuild when $WHEELS/torch-*.whl already exists.
+#
+# Submit:  qsub build_vllm_xpu_torch_install.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-p2i
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase2_torch_install.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export LOGS=$BUILD/logs
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+grep -q 'phase=1 status=PASS' "$BUILD/PHASE_STATUS.md" || { echo "Phase 1 not CLOSED"; exit 1; }
+ls -lh "$WHEELS"/torch-*.whl
+module list | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+
+echo "=== pip install torch ==="
+python -m pip install "$WHEELS"/torch-*.whl
+echo "pip_exit=$?"
+
+echo "=== xpu check ==="
+mpiexec -n 1 --ppn 1 python -c "import torch; print('torch', torch.__version__); print('xpu_available', torch.xpu.is_available()); print('xpu_count', torch.xpu.device_count()); assert torch.xpu.is_available() and torch.xpu.device_count()>=1"
+echo "xpu_check_exit=$?"
+echo "date=$(date)"

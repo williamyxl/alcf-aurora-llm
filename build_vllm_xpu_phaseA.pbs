@@ -1,0 +1,55 @@
+#!/bin/bash -l
+# Phase 0 bootstrap: verify recipes + create conda env. NO frameworks module.
+# Does not compile torch/vllm yet — patch ci-lib.sh before Phase 1 builds.
+#
+# Submit:  qsub build_vllm_xpu_phaseA.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-boot
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bootstrap.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export LOGS=$BUILD/logs
+export RECIPES=$BUILD/frameworks-standalone
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export FRAMEWORKS_ROOT_DIR=$BUILD
+export TMPDIR=/tmp
+
+mkdir -p "$WHEELS" "$LOGS"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+module list
+
+conda create -y -p "$ENV" python=3.12 pip setuptools wheel ninja cmake git jq uv
+conda activate "$ENV"
+
+echo "python=$(command -v python)"
+python -c "import sys; print(sys.version)"
+command -v uv
+command -v jq
+
+ls "$RECIPES/deps/llvm"
+ls "$RECIPES/nightly_wheels"
+
+echo "Expected wheels dir: $WHEELS"
+echo "Phase 0: recipes + env + ci-lib patch (done on login; this job is optional re-check)."
+echo "date=$(date)"

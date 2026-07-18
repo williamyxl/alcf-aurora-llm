@@ -1,0 +1,33 @@
+# Triton Intel driver.c — OpenCL probe optional (Aurora)
+
+**Status:** required for Phase 5 PASS recipe  
+**Applied in:** `$ENV/.../triton/backends/intel/driver.c`  
+**Backup copy:** `triton_intel_driver.c.aurora-opencl-optional`
+
+## Problem
+
+[AuroraBugTracking#102](https://github.com/argonne-lcf/AuroraBugTracking/issues/102):
+
+| `ONEAPI_DEVICE_SELECTOR` | Triton JIT | vLLM `LLM()` MP |
+|--------------------------|------------|-----------------|
+| `level_zero:gpu` | Fail: SYCL “No device…” in `init_devices` OpenCL twin construct | Works |
+| `*:gpu` / unset / dual with OpenCL | Smoke OK | **SIGSEGV** after `Using max model len` |
+
+`init_devices` always constructed an OpenCL `sycl::device` matching each Level Zero device by name. With L0-only filtering, that selector throws.
+
+## Fix
+
+Wrap the OpenCL twin construction in `try { ... } catch (...) { /* skip */ }`.
+
+Pair with:
+
+```bash
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"
+```
+
+so feature flags do not depend on OpenCL extension probing (`has_opencl_extension`).
+
+## Re-apply
+
+After reinstalling the Triton 3.6 wheel, copy/patch `driver.c` again from this directory and clear `TRITON_CACHE_DIR` before the next smoke.

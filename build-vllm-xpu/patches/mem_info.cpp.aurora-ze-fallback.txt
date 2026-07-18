@@ -1,0 +1,7 @@
+# vllm_xpu_kernels mem_info.cpp — Aurora ZE fallback
+
+**Source backup:** `mem_info.cpp.aurora-ze-fallback`  
+**Applied during:** Phase 4 kernels build (ZE device memory properties).
+
+Re-apply to the kernels checkout under `build-src` before rebuilding
+`vllm_xpu_kernels` if the tree is wiped. See `README.md` in this directory.

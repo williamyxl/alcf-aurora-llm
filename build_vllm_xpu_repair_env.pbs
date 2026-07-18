@@ -1,0 +1,62 @@
+#!/bin/bash -l
+# Repair $ENV after Phase 4 pip pulled CUDA torch. Reinstall local XPU wheels with --no-deps.
+#
+# Submit:  qsub build_vllm_xpu_repair_env.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-fix
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase4_repair_env.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "BEFORE:"
+python -m pip show torch | grep -E 'Name:|Version:'
+
+# Drop CUDA PyPI stack that vllm deps pulled in
+python -m pip uninstall -y torch torchvision torchaudio torchcodec triton 2>/dev/null || true
+python -m pip uninstall -y vllm vllm-xpu-kernels 2>/dev/null || true
+# nvidia CUDA wheels if present
+python -m pip list | awk '/^nvidia-/{print $1}' | xargs -r python -m pip uninstall -y
+
+echo "=== reinstall local XPU wheels (--no-deps) ==="
+python -m pip install --force-reinstall --no-deps "$WHEELS"/triton-*.whl
+python -m pip install --force-reinstall --no-deps "$WHEELS"/torch-*.whl
+python -m pip install --force-reinstall --no-deps "$WHEELS"/intel_extension_for_pytorch-*.whl
+python -m pip install --force-reinstall --no-deps "$WHEELS"/oneccl_bind_pt-*.whl
+# local vllm wheel only; do NOT resolve deps against PyPI torch
+if ls "$WHEELS"/vllm-*.whl 1>/dev/null 2>&1; then
+  python -m pip install --force-reinstall --no-deps "$WHEELS"/vllm-*.whl
+fi
+if ls "$WHEELS"/vllm_xpu_kernels-*.whl 1>/dev/null 2>&1; then
+  python -m pip install --force-reinstall --no-deps "$WHEELS"/vllm_xpu_kernels-*.whl
+fi
+
+echo "AFTER:"
+python -m pip show torch triton intel-extension-for-pytorch oneccl-bind-pt vllm 2>/dev/null | grep -E 'Name:|Version:'
+mpiexec -n 1 --ppn 1 python -c "import torch; print('torch', torch.__version__); print('xpu_count', torch.xpu.device_count()); assert torch.xpu.device_count()>=1"
+echo "repair_exit=$?"
+echo "date=$(date)"
