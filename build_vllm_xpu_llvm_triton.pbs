@@ -1,0 +1,64 @@
+#!/bin/bash -l
+# Phase 1: build llvm (or use cache) then triton wheel. NO frameworks module.
+# Resubmit if walltime hits before triton-*.whl exists (KEEP_BUILD_DIR=1).
+#
+# Submit:  qsub build_vllm_xpu_llvm_triton.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-p1
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase1_llvm_triton.out
+#PBS -j oe
+# Note: llvm caches under $BUILD/llvm-$HASH; triton may need several resubmits.
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export LOGS=$BUILD/logs
+export RECIPES=$BUILD/frameworks-standalone
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export FRAMEWORKS_ROOT_DIR=$BUILD
+export FRAMEWORKS_PYTHON_VERSION=3.12
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export KEEP_BUILD_DIR=1
+
+mkdir -p "$WHEELS" "$LOGS"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+echo "FRAMEWORKS_TRITON_VERSION=$FRAMEWORKS_TRITON_VERSION"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "PHASE_STATUS:"
+cat "$BUILD/PHASE_STATUS.md"
+module list
+which uv jq cmake ninja python
+
+cd "$RECIPES"
+echo "=== deps/llvm ==="
+./deps/llvm
+echo "llvm_exit=$?"
+
+echo "=== nightly_wheels/triton ==="
+./nightly_wheels/triton
+echo "triton_exit=$?"
+
+echo "=== artifacts ==="
+ls -lh "$WHEELS"/triton-*.whl 2>/dev/null || echo "NO triton wheel yet"
+ls -d "$BUILD"/llvm-* 2>/dev/null || echo "NO llvm-* prefix yet"
+echo "date=$(date)"

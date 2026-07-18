@@ -1,0 +1,84 @@
+#!/bin/bash -l
+# Phase 5: gpt-oss-120b inference smoke on self-built $ENV (no frameworks).
+# Submit:  qsub infer_chat.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gpt-oss-chat
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/test_gptoss.out
+#PBS -j oe
+
+# Recipe docs: README.md and build-vllm-xpu/SUCCESS_INFER.md
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$BUILD/logs
+
+mkdir -p "$LOGS"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# AuroraBugTracking#102 catch-22: OpenCL in selector SEGVs vLLM MP; L0-only
+# used to break Triton init_devices. Patched driver.c (try/catch) + force
+# extension list so Triton JIT works with level_zero:gpu only.
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"
+# XPU MXFP4 fused MoE has produced all-zero / garbage tokens on gpt-oss;
+# REF path previously yielded non-zero (still garbled under FLASH_ATTN).
+export VLLM_XPU_FUSED_MOE_USE_REF=1
+# Avoid torch.compile/inductor paths that require a working Triton JIT on XPU.
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export CCL_PROCESS_LAUNCHER=hydra
+export CCL_ZE_IPC_EXCHANGE=sockets
+export CCL_WORKER_COUNT=1
+# Per-rank SYCL cache — shared PersistentDeviceCodeCache segfaults under TP allreduce.
+unset SYCL_CACHE_PERSISTENT
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_${PBS_JOBID:-$$}
+mkdir -p "$SYCL_CACHE_DIR"
+export TRITON_CACHE_DIR=$TMPDIR/triton_cache_$$
+mkdir -p "$TRITON_CACHE_DIR"
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "python=$(command -v python)"
+echo "ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-<unset>}"
+module list | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+# Show SYCL devices Triton will see
+command -v sycl-ls >/dev/null && sycl-ls 2>&1 | head -40 || echo "sycl-ls not available"
+python -c "import torch, vllm, vllm_xpu_kernels._C, vllm_xpu_kernels._moe_C; print('torch', torch.__version__); print('vllm', vllm.__version__); print('kernels_ops_ok')"
+
+mpiexec -n 1 --ppn 1 python -c "import torch; print('xpu_count', torch.xpu.device_count())"
+python - <<'PY'
+from importlib.util import find_spec
+print("triton_installed", find_spec("triton") is not None)
+import triton
+print("triton_version", triton.__version__)
+import vllm.triton_utils.importing as imp
+print("HAS_TRITON", imp.HAS_TRITON)
+PY
+# Quick Triton SYCL smoke before full model load (gate).
+mpiexec -n 1 --ppn 1 python triton_xpu_smoke.py || {
+  echo "triton_xpu_smoke FAILED — aborting before one_chat"
+  exit 1
+}
+
+export PYTHONFAULTHANDLER=1
+mpiexec -n 1 --ppn 1 python one_chat.py
+
+echo "date=$(date)"

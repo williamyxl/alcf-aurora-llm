@@ -1,0 +1,45 @@
+#!/bin/bash -l
+# Phase 3a install: pip install existing IPEX wheel + import check.
+#
+# Submit:  qsub build_vllm_xpu_ipex_install.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-p3ai
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase3a_ipex_install.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+grep -q 'phase=2 status=PASS' "$BUILD/PHASE_STATUS.md" || { echo "Phase 2 not CLOSED"; exit 1; }
+ls -lh "$WHEELS"/intel_extension_for_pytorch-*.whl
+
+echo "=== pip install IPEX ==="
+python -m pip install "$WHEELS"/intel_extension_for_pytorch-*.whl
+echo "pip_exit=$?"
+
+python -c "import intel_extension_for_pytorch as ipex; print('ipex', ipex.__version__)"
+echo "import_exit=$?"
+echo "date=$(date)"

@@ -1,0 +1,61 @@
+#!/bin/bash -l
+# Phase 3b: build + install oneccl_bind_pt. Requires Phase 3a CLOSED.
+# Queue: capacity, 1 node, 4h (long compile-friendly).
+#
+# Submit:  qsub build_vllm_xpu_ccl.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-p3b
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase3b_ccl.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export LOGS=$BUILD/logs
+export RECIPES=$BUILD/frameworks-standalone
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export FRAMEWORKS_ROOT_DIR=$BUILD
+export FRAMEWORKS_PYTHON_VERSION=3.12
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export KEEP_BUILD_DIR=1
+
+mkdir -p "$WHEELS" "$LOGS"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+grep -q 'phase=3a status=PASS' "$BUILD/PHASE_STATUS.md" || { echo "Phase 3a not CLOSED"; exit 1; }
+ls -lh "$WHEELS"/torch-*.whl
+module list
+
+cd "$RECIPES"
+echo "=== nightly_wheels/oneccl_bind_pt ==="
+./nightly_wheels/oneccl_bind_pt
+echo "ccl_exit=$?"
+
+echo "=== artifacts ==="
+ls -lh "$WHEELS"/oneccl_bind_pt-*.whl 2>/dev/null || echo "NO oneccl wheel yet"
+
+if ls "$WHEELS"/oneccl_bind_pt-*.whl 1>/dev/null 2>&1; then
+  python -m pip install "$WHEELS"/oneccl_bind_pt-*.whl
+fi
+
+echo "date=$(date)"

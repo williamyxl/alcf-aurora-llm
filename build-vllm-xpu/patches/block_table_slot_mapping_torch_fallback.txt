@@ -1,0 +1,12 @@
+# vLLM block_table — torch fallback when HAS_TRITON=False
+
+**File:** `$ENV/.../vllm/v1/worker/block_table.py`  
+**When:** `compute_slot_mapping` used a Triton kernel path that raises if Triton is missing/broken.
+
+## Fix
+
+Eager PyTorch implementation of slot-mapping when Triton is unavailable.
+
+## Note
+
+Phase 5 PASS runs **with** Triton 3.6 + Aurora OpenCL-optional patch and `TRITON_ATTN`. This fallback remains useful if Triton is temporarily uninstalled or JIT fails.

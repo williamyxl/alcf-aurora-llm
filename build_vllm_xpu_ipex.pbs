@@ -1,0 +1,62 @@
+#!/bin/bash -l
+# Phase 3a: build + install IPEX. Requires Phase 2 CLOSED.
+# Resubmit if walltime hits before wheel (KEEP_BUILD_DIR=1).
+#
+# Submit:  qsub build_vllm_xpu_ipex.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-xpu-p3a
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase3a_ipex.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export WHEELS=$BUILD/$(whoami)
+export LOGS=$BUILD/logs
+export RECIPES=$BUILD/frameworks-standalone
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+export FRAMEWORKS_ROOT_DIR=$BUILD
+export FRAMEWORKS_PYTHON_VERSION=3.12
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export KEEP_BUILD_DIR=1
+
+mkdir -p "$WHEELS" "$LOGS"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+grep -q 'phase=2 status=PASS' "$BUILD/PHASE_STATUS.md" || { echo "Phase 2 not CLOSED"; exit 1; }
+ls -lh "$WHEELS"/torch-*.whl
+module list
+
+cd "$RECIPES"
+echo "=== nightly_wheels/intel_extension_for_pytorch ==="
+./nightly_wheels/intel_extension_for_pytorch
+echo "ipex_exit=$?"
+
+echo "=== artifacts ==="
+ls -lh "$WHEELS"/intel_extension_for_pytorch-*.whl 2>/dev/null || echo "NO IPEX wheel yet"
+
+if ls "$WHEELS"/intel_extension_for_pytorch-*.whl 1>/dev/null 2>&1; then
+  python -m pip install "$WHEELS"/intel_extension_for_pytorch-*.whl
+  python -c "import intel_extension_for_pytorch as ipex; print('ipex', ipex.__version__)"
+fi
+
+echo "date=$(date)"
