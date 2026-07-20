@@ -7,7 +7,7 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 | Workdir | `/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b` |
 | Env | `build-vllm-xpu/env` (Python 3.12) |
 | Model | `models/openai-gpt-oss-120b` (MXFP4 MoE) |
-| Status | **CLOSED** — Phases 0–6 PASS |
+| Status | Phases 0–6 **CLOSED**; perf **PAUSED** — start at [`build-vllm-xpu/RESUME.md`](build-vllm-xpu/RESUME.md) |
 
 ## Project gates
 
@@ -18,7 +18,9 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 | 6 LoRA/SFT 1 epoch | PASS | `build-vllm-xpu/SUCCESS_TRAIN.md` |
 
 **Performance:** S2–S5 closed — [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).  
-**Paused (2026-07-20):** next is P7 metrics → TP=2/4/8 scaling → opts. Resume checklist: [`RESUME.md`](build-vllm-xpu/RESUME.md). Living log: [`PERF.md`](build-vllm-xpu/PERF.md).
+**Paused (2026-07-20):** next is P7 metrics → TP=2/4/8 scaling → opts.  
+**Session recovery (start here):** [`RESUME.md`](build-vllm-xpu/RESUME.md)  
+Living log: [`PERF.md`](build-vllm-xpu/PERF.md) · closure: [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).
 
 Living log: `build-vllm-xpu/PHASE_STATUS.md`
 
