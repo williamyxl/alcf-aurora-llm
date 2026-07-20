@@ -29,6 +29,17 @@ infer_chat.pbs
 infer_serve.pbs          # if present
 one_chat.py
 triton_xpu_smoke.py
+bench_perf.pbs
+bench_perf.py
+bench_perf_persist.pbs
+bench_perf_moe_ref.pbs
+bench_perf_moe_fused.pbs
+bench_perf_moe_fp8.pbs
+bench_perf_graphs.pbs
+bench_perf_tp12.pbs
+bench_perf_tp2.pbs
+bench_perf_tp4.pbs
+bench_perf_ctx131k.pbs
 
 # training
 train_lora_smoke.pbs
@@ -40,7 +51,11 @@ build-vllm-xpu/VERSIONS.md
 build-vllm-xpu/PHASE_STATUS.md
 build-vllm-xpu/SUCCESS_INFER.md
 build-vllm-xpu/SUCCESS_TRAIN.md
+build-vllm-xpu/SUCCESS_PERF.md
 build-vllm-xpu/PERF_PLAN.md
+build-vllm-xpu/PERF.md
+build-vllm-xpu/RESUME.md
+build-vllm-xpu/perf-team/*.md
 build-vllm-xpu/patches/
 ```
 

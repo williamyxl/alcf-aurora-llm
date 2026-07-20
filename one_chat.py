@@ -29,13 +29,14 @@ MESSAGES = [
 
 
 def metrics_from_output(out, n_prompt_tokens, wall_s):
-    """Prefer engine RequestStateStats; fall back to wall-clock totals."""
+    """Prefer engine RequestStateStats; never invent TTFT from wall_s."""
     m = getattr(out, "metrics", None)
     n_output_tokens = len(out.outputs[0].token_ids)
     text = out.outputs[0].text
 
     if m is not None and getattr(m, "first_token_latency", 0) > 0:
         ttft_s = float(m.first_token_latency)
+        ttft_source = "engine"
         decode_s = None
         if m.first_token_ts and m.last_token_ts and m.last_token_ts > m.first_token_ts:
             decode_s = m.last_token_ts - m.first_token_ts
@@ -43,16 +44,22 @@ def metrics_from_output(out, n_prompt_tokens, wall_s):
             decode_tok_s = (n_output_tokens - 1) / decode_s
         else:
             decode_tok_s = "n/a"
+        prefill_tok_s = n_prompt_tokens / ttft_s if ttft_s > 0 else None
     else:
-        # Wall-clock only (no reliable per-token timestamps).
-        ttft_s = wall_s
+        # No reliable first-token latency — do not masquerade wall as TTFT.
+        ttft_s = None
+        ttft_source = "fallback_wall"
         decode_tok_s = "n/a"
+        prefill_tok_s = None
 
-    prefill_tok_s = n_prompt_tokens / ttft_s if ttft_s > 0 else 0.0
+    e2e_tok_s = (n_output_tokens / wall_s) if wall_s > 0 and n_output_tokens > 0 else 0.0
     return {
         "ttft_s": ttft_s,
+        "ttft_source": ttft_source,
         "prefill_tok_s": prefill_tok_s,
         "decode_tok_s": decode_tok_s,
+        "e2e_tok_s": e2e_tok_s,
+        "wall_s": wall_s,
         "n_prompt_tokens": n_prompt_tokens,
         "n_output_tokens": n_output_tokens,
         "finish_reason": out.outputs[0].finish_reason,
@@ -88,6 +95,8 @@ def main():
         max_num_seqs=16,
         # FLASH_ATTN decode garbles gpt-oss on XPU; Triton attn is the workaround.
         attention_backend="TRITON_ATTN",
+        # P7: enable RequestStateStats (TTFT / prefill / decode).
+        disable_log_stats=False,
     )
     print("LLM_constructed", flush=True)
     params = SamplingParams(temperature=0.0, max_tokens=128)
@@ -108,19 +117,18 @@ def main():
     out = llm.generate([prompt], params)[0]
     wall_s = time.perf_counter() - t0
     metrics, text = metrics_from_output(out, n_prompt_tokens, wall_s)
-    metrics["wall_s"] = wall_s
-    if metrics["decode_tok_s"] == "n/a" and metrics["n_output_tokens"] > 0 and wall_s > 0:
-        # End-to-end throughput (includes prefill); useful when TTFT stats missing.
-        metrics["e2e_tok_s"] = metrics["n_output_tokens"] / wall_s
 
     print("=== reply ===")
     print(text)
     print("=== metrics ===")
-    print(f"TTFT_s={metrics['ttft_s']:.6f}")
-    print(f"prefill_tok_s={metrics['prefill_tok_s']:.6f}")
+    ttft = metrics["ttft_s"]
+    print(f"TTFT_s={'null' if ttft is None else f'{ttft:.6f}'} source={metrics['ttft_source']}")
+    pref = metrics["prefill_tok_s"]
+    print(f"prefill_tok_s={'n/a' if pref is None else f'{pref:.6f}'}")
     dts = metrics["decode_tok_s"]
     print(f"decode_tok_s={dts if isinstance(dts, str) else f'{dts:.6f}'}")
     print(f"wall_s={wall_s:.6f}")
+    print(f"e2e_tok_s={metrics['e2e_tok_s']:.6f}")
     print("METRICS_JSON=" + json.dumps(metrics, separators=(",", ":")))
     print("=== done ===")
 

@@ -17,6 +17,9 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 | 5 Inference | PASS | `build-vllm-xpu/SUCCESS_INFER.md` |
 | 6 LoRA/SFT 1 epoch | PASS | `build-vllm-xpu/SUCCESS_TRAIN.md` |
 
+**Performance:** S2–S5 closed — [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).  
+**Paused (2026-07-20):** next is P7 metrics → TP=2/4/8 scaling → opts. Resume checklist: [`RESUME.md`](build-vllm-xpu/RESUME.md). Living log: [`PERF.md`](build-vllm-xpu/PERF.md).
+
 Living log: `build-vllm-xpu/PHASE_STATUS.md`
 
 ## Quick start — inference
@@ -65,6 +68,11 @@ workdir/llm/gpt-oss-120b/
     PHASE_STATUS.md
     SUCCESS_INFER.md
     SUCCESS_TRAIN.md
+    SUCCESS_PERF.md         # S2–S5 perf closure
+    PERF.md                 # living perf experiment log
+    RESUME.md               # pause/resume checklist (perf)
+    PERF_PLAN.md
+    perf-team/              # A1–A6 + SCALING_TP248.md
     patches/                # runtime/source patches
     xiaoliyan/              # built wheels
     logs/
@@ -104,4 +112,4 @@ All smoke/build jobs: `-q debug`, `walltime=00:59:59`, `-A MatSciAI`, `#PBS -j o
 4. **Self-built Triton 3.8** → JIT broken; keep 3.6 + Aurora `driver.c` patch.
 5. **TRL default `chunked_nll`** → crashes with `device_map="auto"`; use `loss_type="nll"`.
 6. **MXFP4 training** → transformers requires `Mxfp4Config(dequantize=True)`.
-7. **Cold performance numbers** → Phase 5 e2e ~0.37 tok/s includes Triton JIT; see `build-vllm-xpu/PERF_PLAN.md` for optimization plan (warm baseline → MoE → TP=12).
+7. **Cold / warm performance** → quality-passing e2e ≈0.37 warm tok/s (cold ≈0.29); see `build-vllm-xpu/SUCCESS_PERF.md` (S2–S5 closed; P6 131072 pending).

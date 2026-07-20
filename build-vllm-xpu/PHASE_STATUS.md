@@ -118,3 +118,5 @@ phase=6 status=IN_PROGRESS date=2026-07-18T01:38:21+00:00 notes: 8680241 loaded 
 phase=6 status=PASS date=2026-07-18T02:16:12+00:00 notes: job 8680277 LoRA/SFT epochs=1 on XPU complete; TRAIN_JSON ok; adapter at checkpoints/lora-smoke/adapter. SUCCESS_TRAIN.md written. Full project closed (infra+infer+train).
 
 phase=project status=CLOSED date=2026-07-18T02:30:00+00:00 notes: Docs refreshed (README.md, VERSIONS.md, PHASE_STATUS summary, patches, plan todos marked complete).
+
+phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~0.37 warm tok/s quality recipe). P7 code landed (disable_log_stats=False) but validation not finished (debug queue starved). Standing rule: every future metric campaign = TP=2/4/8 + P7 fields. Resume from build-vllm-xpu/RESUME.md — P7 then scaling then fused-MoE quality / serve / P6.
