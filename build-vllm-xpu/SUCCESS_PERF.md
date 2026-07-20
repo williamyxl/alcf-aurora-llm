@@ -82,7 +82,9 @@ Raw log: `build-vllm-xpu/logs/bench_perf.out`.
 
 Valid TP for 64 heads: 1, 2, 4, 8, 16, … — **not 12**. Full-node tile use needs EP/other sharding, not attn TP=12.
 
-## Pending (paused 2026-07-20 — see [`RESUME.md`](RESUME.md))
+## Pending (paused 2026-07-20)
+
+**Full session recovery:** [`RESUME.md`](RESUME.md) (ordered steps, recipes, OOM/P7 root causes, job ledger, ingest template).
 
 | Item | Status |
 |------|--------|

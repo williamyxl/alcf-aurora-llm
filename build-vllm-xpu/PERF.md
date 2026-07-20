@@ -4,9 +4,11 @@ Living experiment + hypothesis/solution log for Aurora PVC (self-built vLLM-XPU 
 
 **Closure:** S2–S5 complete — see [`SUCCESS_PERF.md`](SUCCESS_PERF.md). Best quality-passing recipe remains Phase 5 PASS at ≈0.37 warm e2e tok/s (not a speed breakthrough).
 
-**Paused 2026-07-20** — see [`RESUME.md`](RESUME.md).  
+**Paused 2026-07-20** — full session recovery: [`RESUME.md`](RESUME.md).  
 **P7 GATE (code landed, not validated):** `LLM(..., disable_log_stats=False)`. Expect `ttft_source=engine` + `prefill_tok_s` / `decode_tok_s`.  
 **Standing rule:** every future perf campaign runs **TP=2/4/8** with P7 fields → `perf-team/SCALING_TP248.md`.
+
+> **New session / agent:** read `RESUME.md` end-to-end before submitting jobs.
 
 **Phase 0 goal:** honest cold / warm / warm2 baseline with `PERF_JSON`. Do not optimize until baseline exists.
 
