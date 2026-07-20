@@ -20,7 +20,7 @@ gpt-oss-120b inference on the self-built Torch-XPU + IPEX + oneCCL + vLLM stack 
 | `VLLM_XPU_FUSED_MOE_USE_REF` | `1` (fused XPU MXFP4 MoE alone → all `!`) |
 | Attention | `attention_backend="TRITON_ATTN"` |
 | TP | 8 |
-| Other | `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `TORCHDYNAMO_DISABLE=1`, `TORCH_COMPILE_DISABLE=1`, `CCL_WORKER_COUNT=1`, unset `SYCL_CACHE_PERSISTENT`, per-job SYCL/Triton caches |
+| Other | `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `TORCHDYNAMO_DISABLE=1`, `TORCH_COMPILE_DISABLE=1`, `CCL_WORKER_COUNT=1`, unset `SYCL_CACHE_PERSISTENT`, durable `$WORKDIR/.cache/{triton,sycl}_xpu_gptoss` (aligned with `bench_perf_persist.pbs`) |
 | Triton patch | `triton/backends/intel/driver.c` — OpenCL twin-device probe wrapped in try/catch (see `build-vllm-xpu/patches/triton_intel_driver_opencl_optional.txt`) |
 
 Do **not** expose OpenCL in `ONEAPI_DEVICE_SELECTOR` (`*:gpu` / dual selector) — vLLM multiprocess SEGVs after smoke.
@@ -37,7 +37,7 @@ Warmup / timed reply (head): Type I IUPAC isotherm for microporous Cu-BTC CO2 up
 {"ttft_s":343.3135431089995,"prefill_tok_s":0.5009997521285995,"decode_tok_s":"n/a","n_prompt_tokens":172,"n_output_tokens":128,"finish_reason":"length","text_preview":"analysisWe need to answer three points, under 200 words, numbered. Provide IUPAC isotherm type: Type I (a) typical for microporous materials with strong adsorption at low pressure and plateau. Reason:","token_ids_head":[200005,35644,200008,2167,1309,316,6052,3407,5571,11,1641,220,1179,6391,11,93194],"wall_s":343.3135431089995,"e2e_tok_s":0.37283702483988795}
 ```
 
-Notes: first-token / wall time dominated by Triton JIT (`kernel_unified_attention`); e2e ~0.37 tok/s after cold compile. Decode tok/s n/a (no per-token timestamps in this path).
+Notes: the reported “343 s TTFT” equals `wall_s` (e2e wall, not engine first-token — `ttft_source` would be `fallback_wall` after S1). Dominated by Triton JIT (`kernel_unified_attention`); e2e ~0.37 tok/s after cold compile. Decode tok/s n/a (no per-token timestamps in this path).
 
 ## Scripts
 

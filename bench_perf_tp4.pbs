@@ -1,0 +1,68 @@
+#!/bin/bash -l
+# TP scaling: TP=4, REF MoE, PASS recipe otherwise. Pair with tp2/tp8 for scaling analysis.
+# Submit:  qsub -q debug-scaling bench_perf_tp4.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gpt-oss-tp4
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_tp4.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$BUILD/logs
+
+mkdir -p "$LOGS"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"
+export VLLM_XPU_FUSED_MOE_USE_REF=1
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export CCL_PROCESS_LAUNCHER=hydra
+export CCL_ZE_IPC_EXCHANGE=sockets
+export CCL_WORKER_COUNT=1
+unset SYCL_CACHE_PERSISTENT
+
+JOBTAG=${PBS_JOBID:-$$}
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_bench_${JOBTAG}
+export TRITON_CACHE_DIR=$TMPDIR/triton_cache_bench_${JOBTAG}
+mkdir -p "$SYCL_CACHE_DIR" "$TRITON_CACHE_DIR"
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "tp=4 moe_mode=ref scaling_study=1"
+echo "TRITON_CACHE_DIR=$TRITON_CACHE_DIR"
+module list | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+python -c "import torch, vllm, vllm_xpu_kernels._C, vllm_xpu_kernels._moe_C; print('torch', torch.__version__); print('vllm', vllm.__version__); print('kernels_ops_ok')"
+mpiexec -n 1 --ppn 1 python -c "import torch; print('xpu_count', torch.xpu.device_count())"
+
+mpiexec -n 1 --ppn 1 python triton_xpu_smoke.py || {
+  echo "triton_xpu_smoke FAILED — aborting"
+  exit 1
+}
+
+export PYTHONFAULTHANDLER=1
+# TP=4 weights ~16 GiB/tile. Same XPU util→KV over-alloc OOM as TP=2; pin explicit KV.
+mpiexec -n 1 --ppn 1 python bench_perf.py --tp 4 --max-tokens 128 --moe-mode ref \
+  --gpu-memory-utilization 0.82 --max-num-seqs 2 --kv-cache-memory-gib 8
+
+echo "date=$(date)"
