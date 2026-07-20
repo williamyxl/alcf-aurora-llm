@@ -119,4 +119,4 @@ phase=6 status=PASS date=2026-07-18T02:16:12+00:00 notes: job 8680277 LoRA/SFT e
 
 phase=project status=CLOSED date=2026-07-18T02:30:00+00:00 notes: Docs refreshed (README.md, VERSIONS.md, PHASE_STATUS summary, patches, plan todos marked complete).
 
-phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~0.37 warm tok/s quality recipe). P7 code landed (disable_log_stats=False) but validation not finished (debug queue starved). Standing rule: every future metric campaign = TP=2/4/8 + P7 fields. Resume from build-vllm-xpu/RESUME.md — P7 then scaling then fused-MoE quality / serve / P6.
+phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~0.37 warm tok/s quality recipe). P7 code landed (disable_log_stats=False) but validation not finished (debug queue starved). Standing rule: every future metric campaign = TP=2/4/8 + P7 fields. Session recovery doc: build-vllm-xpu/RESUME.md (full recipe, OOM/P7 root causes, job ledger, commands). Local commits f60a2bb+f6d174d may need git push from authed host.
