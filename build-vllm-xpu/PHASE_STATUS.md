@@ -120,3 +120,7 @@ phase=6 status=PASS date=2026-07-18T02:16:12+00:00 notes: job 8680277 LoRA/SFT e
 phase=project status=CLOSED date=2026-07-18T02:30:00+00:00 notes: Docs refreshed (README.md, VERSIONS.md, PHASE_STATUS summary, patches, plan todos marked complete).
 
 phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~0.37 warm tok/s quality recipe). P7 code landed (disable_log_stats=False) but validation not finished (debug queue starved). Standing rule: every future metric campaign = TP=2/4/8 + P7 fields. Session recovery doc: build-vllm-xpu/RESUME.md (full recipe, OOM/P7 root causes, job ledger, commands). Local commits f60a2bb+f6d174d may need git push from authed host.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T04:12:00+00:00 notes: Resumed. P7 validation job submitted (bench_perf.pbs). Next: TP=2/4/8 scaling with KV pin, then fused-MoE quality / serve / P6.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T06:05:00+00:00 notes: BEST_PRACTICE.md written — TP=2 recommended (warm2 e2e 1.15). Scaling COMPLETE. Next: fused MoE quality TP=2/4/8 (bench_perf_moe_fused{,_tp2,_tp4}.pbs). one_chat.py default TP=2+KV pin.
