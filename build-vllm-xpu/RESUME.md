@@ -1,6 +1,7 @@
 # RESUME — performance work (session recovery)
 
 **Paused:** 2026-07-20 (~18:00 UTC)  
+**Resumed:** 2026-07-21 — P7 + TP scaling **done**; **TP=2 is best practice**; next = fused MoE quality.  
 **Purpose of this file:** Enough context for a **new chat / new engineer / new agent** to continue without the prior conversation.
 
 Stack bring-up (Phases **0–6**) is **CLOSED**. Only **performance** work is open.
@@ -16,15 +17,19 @@ Stack bring-up (Phases **0–6**) is **CLOSED**. Only **performance** work is op
 | Model | `models/openai-gpt-oss-120b` (MXFP4 MoE, ~60.8 GiB on disk) |
 | Account / PBS | `-A MatSciAI`; typical queues `debug` / `debug-scaling` (max walltime **01:00:00**) |
 | Git | repo `https://github.com/williamyxl/alcf-aurora-llm.git`, branch `main` |
-| Last local commit | `f60a2bb` — *Add perf harness, P7 metrics wiring, and pause/resume docs.* |
-| Push status | **Local commit may be ahead of `origin/main`** — push failed from Aurora UAN (no GitHub creds). Run `git status` / `git push origin main` from a machine with auth. |
+| Last local commit | `1b8efdb` (RESUME/perf docs); branch may be synced with origin — verify `git status` |
+| Push status | Check `git status -sb`; push if still ahead |
+| Best practice | [`BEST_PRACTICE.md`](BEST_PRACTICE.md) — **TP=2**, warm2 ≈ **1.15** e2e tok/s |
+| Active P7 job | **8681016** — **PASS** (engine TTFT); see PERF.md §P7 |
+| Scaling jobs | TP=2 **8681063** / TP=4 **8681062** / TP=8 **8681016** — **COMPLETE** |
+| Best BS=1 REF | **TP=2** warm2 e2e **1.15** tok/s ≫ TP=4 0.66 ≫ TP=8 0.37 (inverse scaling) |
 | Prior chat | Cursor transcript: `482a0618-af7b-4bb9-bb9f-ac69719a9c03` under agent-transcripts (optional) |
 
-**Next ordered work (do not reorder):**
+**Next ordered work:**
 
-1. **P7** — validate engine TTFT / prefill / decode metrics  
-2. **TP=2/4/8 scaling** with P7 metrics (standing rule for *every* future campaign)  
-3. **Optimization** — fused MoE quality → serve (P4) → long context (P6); each campaign includes TP=2/4/8  
+1. ~~**P7**~~ — PASS  
+2. ~~**TP=2/4/8 scaling**~~ — COMPLETE → `BEST_PRACTICE.md` + `SCALING_TP248.md`  
+3. **Optimization** — fused MoE quality (`bench_perf_moe_fused{,_tp2,_tp4}.pbs`) → serve (P4) → long context (P6)
 
 ---
 
@@ -244,11 +249,12 @@ Notes: ...
 | Doc | Role |
 |------|------|
 | **This file (`RESUME.md`)** | Session recovery + ordered next steps |
+| `BEST_PRACTICE.md` | **Current recommended recipe (TP=2)** + scaling summary |
 | `PERF_PLAN.md` | Strategy / workstreams / standing rules |
 | `PERF.md` | Living experiment log |
 | `SUCCESS_PERF.md` | S2–S5 quality-gated closure |
 | `SUCCESS_INFER.md` / `SUCCESS_TRAIN.md` | Bring-up gates (CLOSED) |
-| `PHASE_STATUS.md` | Chronological phase notes (includes `perf PAUSED`) |
+| `PHASE_STATUS.md` | Chronological phase notes |
 | `perf-team/SCALING_TP248.md` | TP=2/4/8 results |
 | `perf-team/A1`–`A6_*.md` | Hypotheses / solutions / reviews |
 | `../README.md` | Project entry |

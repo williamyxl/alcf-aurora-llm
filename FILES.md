@@ -34,6 +34,8 @@ bench_perf.py
 bench_perf_persist.pbs
 bench_perf_moe_ref.pbs
 bench_perf_moe_fused.pbs
+bench_perf_moe_fused_tp2.pbs
+bench_perf_moe_fused_tp4.pbs
 bench_perf_moe_fp8.pbs
 bench_perf_graphs.pbs
 bench_perf_tp12.pbs
@@ -52,6 +54,7 @@ build-vllm-xpu/PHASE_STATUS.md
 build-vllm-xpu/SUCCESS_INFER.md
 build-vllm-xpu/SUCCESS_TRAIN.md
 build-vllm-xpu/SUCCESS_PERF.md
+build-vllm-xpu/BEST_PRACTICE.md
 build-vllm-xpu/PERF_PLAN.md
 build-vllm-xpu/PERF.md
 build-vllm-xpu/RESUME.md

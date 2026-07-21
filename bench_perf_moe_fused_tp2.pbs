@@ -1,16 +1,16 @@
 #!/bin/bash -l
-# Fused MoE quality campaign — TP=8. Quality gate critical (historically all-!).
-# Pair with bench_perf_moe_fused_tp{2,4}.pbs for full TP=2/4/8 table.
-# Submit:  qsub bench_perf_moe_fused.pbs
+# Fused MoE quality campaign — TP=2 (KV pin). Quality gate critical (historically all-!).
+# Pair with moe_fused_tp4 + moe_fused (TP=8). Standing rule: full TP=2/4/8 table.
+# Submit:  qsub bench_perf_moe_fused_tp2.pbs
 #
 #PBS -l select=1
 #PBS -l place=scatter
 #PBS -l walltime=00:59:59
-#PBS -q debug
+#PBS -q debug-scaling
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
-#PBS -N gpt-oss-moe-fused
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_moe_fused.out
+#PBS -N gpt-oss-fused-tp2
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_moe_fused_tp2.out
 #PBS -j oe
 
 export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
@@ -51,13 +51,9 @@ mkdir -p "$SYCL_CACHE_DIR" "$TRITON_CACHE_DIR"
 
 echo "host=$(hostname)"
 echo "date=$(date)"
-echo "python=$(command -v python)"
-echo "ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-<unset>}"
-echo "moe_mode=fused REF=${VLLM_XPU_FUSED_MOE_USE_REF:-<unset>}"
+echo "tp=2 moe_mode=fused REF=${VLLM_XPU_FUSED_MOE_USE_REF:-<unset>} campaign=fused_quality_tp248"
 echo "TRITON_CACHE_DIR=$TRITON_CACHE_DIR"
-echo "SYCL_CACHE_DIR=$SYCL_CACHE_DIR"
 module list | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
-command -v sycl-ls >/dev/null && sycl-ls 2>&1 | head -40 || echo "sycl-ls not available"
 python -c "import torch, vllm, vllm_xpu_kernels._C, vllm_xpu_kernels._moe_C; print('torch', torch.__version__); print('vllm', vllm.__version__); print('kernels_ops_ok')"
 mpiexec -n 1 --ppn 1 python -c "import torch; print('xpu_count', torch.xpu.device_count())"
 
@@ -67,6 +63,7 @@ mpiexec -n 1 --ppn 1 python triton_xpu_smoke.py || {
 }
 
 export PYTHONFAULTHANDLER=1
-mpiexec -n 1 --ppn 1 python bench_perf.py --tp 8 --max-tokens 128 --moe-mode fused
+mpiexec -n 1 --ppn 1 python bench_perf.py --tp 2 --max-tokens 128 --moe-mode fused \
+  --gpu-memory-utilization 0.82 --max-num-seqs 2 --kv-cache-memory-gib 8
 
 echo "date=$(date)"

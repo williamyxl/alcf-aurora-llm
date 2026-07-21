@@ -1,29 +1,43 @@
 # SUCCESS_PERF — S2–S5 performance closure (quality-gated)
 
-**Date:** 2026-07-18  
-**Baseline job:** `8680399` (`bench_perf.pbs`, host `x4303c1s3b0n0`)  
-**Living log:** [`PERF.md`](PERF.md) · plan: [`PERF_PLAN.md`](PERF_PLAN.md)
+**Date:** 2026-07-18 (closure) · **Updated:** 2026-07-21 (P7 + TP scaling)  
+**Baseline job (historical TP=8):** `8680399`  
+**Current best practice:** [`BEST_PRACTICE.md`](BEST_PRACTICE.md) — **TP=2**, warm2 e2e ≈ **1.15** tok/s  
+**Living log:** [`PERF.md`](PERF.md) · plan: [`PERF_PLAN.md`](PERF_PLAN.md) · scaling: [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md)
 
 ## Verdict
 
-**Not a speed breakthrough.** After S2–S5, the best **quality-passing** recipe remains the Phase 5 PASS stack at ≈ **0.37 warm / warm2 e2e tok/s** (cold ≈ **0.29**). Faster MoE paths (~1.47 tok/s) fail the quality gate and are discarded. Engine TTFT unavailable (`ttft_s=null`, `ttft_source=fallback_wall`).
+**Current best quality-passing single-stream recipe uses 2 GPU tiles (TP=2):** warm2 e2e ≈ **1.15** tok/s, decode ≈ **1.22** tok/s, engine TTFT ≈ **7.5 s** (job **8681063**).  
 
-## Best quality-passing recipe (unchanged)
+Historical Phase 5 / S2–S5 default was TP=8 ≈ **0.37** warm e2e tok/s. Faster MoE paths (~1.47 tok/s) still **fail** the quality gate and are discarded. P7 fixed fake TTFT (`fallback_wall`); true engine metrics are required for all claims.
 
-Same as Phase 5 PASS / `SUCCESS_INFER.md` / `infer_chat.pbs`:
+## Best quality-passing recipe (2026-07-21)
 
 | Setting | Value |
 |---------|--------|
-| TP | **8** |
+| TP | **2** (not 8) |
 | MoE | **REF** (`VLLM_XPU_FUSED_MOE_USE_REF=1`) |
 | Attention | `TRITON_ATTN` |
 | `enforce_eager` | `True` |
 | `max_model_len` | `4096` |
 | dtype | `bfloat16` |
+| KV | `--kv-cache-memory-gib 8`, `max_num_seqs=2` |
 | Selector | `ONEAPI_DEVICE_SELECTOR=level_zero:gpu` |
 | Triton | Intel device extensions + OpenCL-optional `driver.c` patch |
 
-## Phase 0 baseline (KPI)
+See [`BEST_PRACTICE.md`](BEST_PRACTICE.md) for full checklist and run commands.
+
+## TP scaling (2026-07-21, P7 metrics)
+
+| TP | Job | warm2 e2e | warm2 decode | warm2 TTFT | quality |
+|----|-----|-----------|--------------|------------|---------|
+| **2** | **8681063** | **1.147** | **1.220** | **7.50 s** | true |
+| 4 | 8681062 | 0.658 | 0.711 | 15.77 s | true |
+| 8 | 8681016 | 0.366 | 0.400 | 32.08 s | true |
+
+**Recommendation:** prefer **TP=2** for single-stream. Inverse scaling under REF MoE BS=1.
+
+## Phase 0 baseline (historical KPI, TP=8)
 
 | Run | wall_s | e2e_tok_s | ttft_s | ttft_source | quality_ok |
 |-----|--------|-----------|--------|-------------|------------|
@@ -53,18 +67,7 @@ Same as Phase 5 PASS / `SUCCESS_INFER.md` / `infer_chat.pbs`:
   "warm2_e2e_tok_s": 0.37240353868616627,
   "n_prompt_tokens": 172,
   "n_output_tokens": 128,
-  "text_preview": "analysisWe need to answer three points, under 200 words, numbered. Provide IUPAC isotherm type: Type I (a) typical for microporous materials with strong adsorption at low pressure and plateau. Reason:",
-  "quality_ok": true,
-  "runs": {
-    "warm2": {
-      "ttft_s": null,
-      "ttft_source": "fallback_wall",
-      "e2e_tok_s": 0.37240353868616627,
-      "wall_s": 343.71316784900046,
-      "n_output_tokens": 128,
-      "quality_ok": true
-    }
-  }
+  "quality_ok": true
 }
 ```
 
@@ -80,25 +83,24 @@ Raw log: `build-vllm-xpu/logs/bench_perf.out`.
 | **S4** `enforce_eager=false` | 8680603 | warm2 ≈0.37, quality OK; compile/cudagraph still NONE | No win vs eager |
 | **S5** TP=12 | 8680623 | **FAIL** at LLM init — `64 attn heads % 12 != 0` | Invalid for gpt-oss |
 
-Valid TP for 64 heads: 1, 2, 4, 8, 16, … — **not 12**. Full-node tile use needs EP/other sharding, not attn TP=12.
+Valid TP for 64 heads: 1, 2, 4, 8, 16, … — **not 12**.
 
-## Pending (paused 2026-07-20)
+## Pending (updated 2026-07-21)
 
-**Full session recovery:** [`RESUME.md`](RESUME.md) (ordered steps, recipes, OOM/P7 root causes, job ledger, ingest template).
+**Session recovery:** [`RESUME.md`](RESUME.md).
 
 | Item | Status |
 |------|--------|
-| **P7** true TTFT / prefill / decode tok/s (`disable_log_stats=False`) | **code landed**; validate on resume |
-| **TP=2/4/8 scaling** with P7 metrics + KV pin | **standing rule** for all future campaigns |
-| Fused MoE quality (path to ≫0.37 tok/s) | next opt after scaling |
-| **P4** serve / concurrent | after P7 + scaling |
-| **P6** `max_model_len=131072` | after P7; include TP=2/4/8 |
+| **P7** true TTFT / prefill / decode | **PASS** (8681016) |
+| **TP=2/4/8 scaling** with P7 + KV pin | **COMPLETE** — TP=2 best; see `BEST_PRACTICE.md` |
+| Fused MoE quality (path to ≫1.15 tok/s quality-ok) | **in progress** |
+| **P4** serve / concurrent | after fused MoE |
+| **P6** `max_model_len=131072` | include TP=2/4/8 |
 
-Default context stays `4096`. Engine TTFT was unavailable on job 8680399 (`fallback_wall`); P7 is meant to fix that.
+Default context stays `4096`.
 
 ## Related
 
-- Inference gate: [`SUCCESS_INFER.md`](SUCCESS_INFER.md)
-- Experiment log: [`PERF.md`](PERF.md)
-- Resume checklist: [`RESUME.md`](RESUME.md)
-- Team notes: [`perf-team/`](perf-team/)
+- [`BEST_PRACTICE.md`](BEST_PRACTICE.md) — **start here for how to run**
+- [`SUCCESS_INFER.md`](SUCCESS_INFER.md) — Phase 5 quality PASS (historical TP=8)
+- [`RESUME.md`](RESUME.md) — cold session recovery

@@ -2,15 +2,28 @@
 
 Living experiment + hypothesis/solution log for Aurora PVC (self-built vLLM-XPU stack).
 
-**Closure:** S2–S5 complete — see [`SUCCESS_PERF.md`](SUCCESS_PERF.md). Best quality-passing recipe remains Phase 5 PASS at ≈0.37 warm e2e tok/s (not a speed breakthrough).
+**Closure:** S2–S5 complete — see [`SUCCESS_PERF.md`](SUCCESS_PERF.md).  
+**Current best practice:** [`BEST_PRACTICE.md`](BEST_PRACTICE.md) — **TP=2**, warm2 e2e ≈ **1.15** tok/s (≃3× historical TP=8).
 
-**Paused 2026-07-20** — full session recovery: [`RESUME.md`](RESUME.md).  
-**P7 GATE (code landed, not validated):** `LLM(..., disable_log_stats=False)`. Expect `ttft_source=engine` + `prefill_tok_s` / `decode_tok_s`.  
-**Standing rule:** every future perf campaign runs **TP=2/4/8** with P7 fields → `perf-team/SCALING_TP248.md`.
+**Resumed 2026-07-21** — [`RESUME.md`](RESUME.md).  
+**P7 PASS** — job **8681016**.  
+**TP=2/4/8 scaling COMPLETE** — see [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md): **TP=2 best** (warm2 e2e **1.15** tok/s) ≫ TP=4 (0.66) ≫ TP=8 (0.37).  
+**Next:** fused MoE quality campaign (`bench_perf_moe_fused{,_tp2,_tp4}.pbs`) with full TP=2/4/8 + quality gate.  
+**Standing rule:** every future perf campaign runs **TP=2/4/8** with P7 fields.
 
-> **New session / agent:** read `RESUME.md` end-to-end before submitting jobs.
+## P7 — engine TTFT / prefill / decode — PASS (8681016)
 
-**Phase 0 goal:** honest cold / warm / warm2 baseline with `PERF_JSON`. Do not optimize until baseline exists.
+`disable_log_stats=False` populates `RequestOutput.metrics`. Host `x4408c7s2b0n0`, TP=8, REF MoE, same PASS recipe.
+
+| Run | wall_s | e2e tok/s | ttft_s | ttft_source | prefill tok/s | decode tok/s | quality_ok |
+|-----|--------|-----------|--------|-------------|---------------|--------------|------------|
+| cold | 441.4 | 0.290 | **69.4** | engine | 2.48 | 0.341 | true |
+| warm | 349.7 | 0.366 | **32.0** | engine | 5.37 | 0.400 | true |
+| warm2 | 349.7 | 0.366 | **32.1** | engine | 5.36 | 0.400 | true |
+
+**Interpretation:** Prior “343 s TTFT” was e2e wall. True warm TTFT ≈ **32 s**; decode ≈ **0.40 tok/s** dominates the remaining ~318 s of a 128-token generate. Steady-state bottleneck is decode (REF MoE), not missing TTFT instrumentation.
+
+Raw: `build-vllm-xpu/logs/bench_perf.out` (append after Jul 18 baseline; backup `bench_perf.out.pre_p7_8680399`).
 
 ## Schema (`PERF_JSON`)
 

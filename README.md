@@ -7,7 +7,7 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 | Workdir | `/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b` |
 | Env | `build-vllm-xpu/env` (Python 3.12) |
 | Model | `models/openai-gpt-oss-120b` (MXFP4 MoE) |
-| Status | Phases 0–6 **CLOSED**; perf **PAUSED** — start at [`build-vllm-xpu/RESUME.md`](build-vllm-xpu/RESUME.md) |
+| Status | Phases 0–6 **CLOSED**; perf **IN PROGRESS** — best practice: [`build-vllm-xpu/BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) |
 
 ## Project gates
 
@@ -17,10 +17,9 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 | 5 Inference | PASS | `build-vllm-xpu/SUCCESS_INFER.md` |
 | 6 LoRA/SFT 1 epoch | PASS | `build-vllm-xpu/SUCCESS_TRAIN.md` |
 
-**Performance:** S2–S5 closed — [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).  
-**Paused (2026-07-20):** next is P7 metrics → TP=2/4/8 scaling → opts.  
-**Session recovery (start here):** [`RESUME.md`](build-vllm-xpu/RESUME.md)  
-Living log: [`PERF.md`](build-vllm-xpu/PERF.md) · closure: [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).
+**Performance (2026-07-21):** **TP=2 is best** for single-stream REF MoE (warm2 ≈ **1.15** e2e tok/s).  
+**Start here:** [`BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) · scaling: [`SCALING_TP248.md`](build-vllm-xpu/perf-team/SCALING_TP248.md)  
+**Session recovery:** [`RESUME.md`](build-vllm-xpu/RESUME.md) · log: [`PERF.md`](build-vllm-xpu/PERF.md) · closure: [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).
 
 Living log: `build-vllm-xpu/PHASE_STATUS.md`
 
@@ -38,7 +37,8 @@ Required runtime recipe (also in `SUCCESS_INFER.md` / `infer_chat.pbs`):
 - `ONEAPI_DEVICE_SELECTOR=level_zero:gpu`
 - `TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"`
 - `VLLM_XPU_FUSED_MOE_USE_REF=1`
-- `attention_backend="TRITON_ATTN"`, TP=8
+- `attention_backend="TRITON_ATTN"`, **TP=2** (best practice; historical PASS used TP=8)
+- `--kv-cache-memory-gib 8` / `kv_cache_memory_bytes` for TP=2/4 (avoids util-planner OOM)
 - Triton `driver.c` OpenCL try/catch patch (see `build-vllm-xpu/patches/`)
 
 Do **not** put OpenCL in the device selector (`*:gpu` / dual) — Triton smoke may pass, then vLLM multiprocess SEGVs.
@@ -64,6 +64,7 @@ workdir/llm/gpt-oss-120b/
   train_lora_smoke.pbs / lora_one_epoch.py
   build_vllm_xpu_*.pbs      # phased build jobs
   build-vllm-xpu/
+    BEST_PRACTICE.md        # current recommended recipe (TP=2)
     env/                    # conda env
     pins.env
     VERSIONS.md
@@ -114,4 +115,5 @@ All smoke/build jobs: `-q debug`, `walltime=00:59:59`, `-A MatSciAI`, `#PBS -j o
 4. **Self-built Triton 3.8** → JIT broken; keep 3.6 + Aurora `driver.c` patch.
 5. **TRL default `chunked_nll`** → crashes with `device_map="auto"`; use `loss_type="nll"`.
 6. **MXFP4 training** → transformers requires `Mxfp4Config(dequantize=True)`.
-7. **Cold / warm performance** → quality-passing e2e ≈0.37 warm tok/s (cold ≈0.29); see `build-vllm-xpu/SUCCESS_PERF.md` (S2–S5 closed; P6 131072 pending).
+7. **TP=8 for single-stream** → slow (~0.37 e2e); use **TP=2** (~1.15 e2e) — see `BEST_PRACTICE.md`.
+8. **TP=2/4 without KV pin** → OOM (util planner reserves ~50 GiB KV); use `--kv-cache-memory-gib 8`.

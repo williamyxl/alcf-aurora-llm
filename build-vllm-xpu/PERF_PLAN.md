@@ -202,10 +202,10 @@ flowchart LR
   Scale --> P6[P6 131k with TP 2/4/8]
 ```
 
-## Execution order (paused 2026-07-20 — [`RESUME.md`](RESUME.md))
+## Execution order (updated 2026-07-21)
 
-1. **P7** (GATE) — validate `disable_log_stats=False` → `ttft_source=engine` + prefill/decode  
-2. **TP=2/4/8 scaling** — P7 metrics + TP2/4 `--kv-cache-memory-gib 8`; ingest `SCALING_TP248.md`  
-3. **Optimization** — each campaign includes fresh **TP=2/4/8**; fused MoE quality → P4 serve → P6 131k  
+1. ~~**P7** (GATE)~~ — PASS (`ttft_source=engine`)  
+2. ~~**TP=2/4/8 scaling**~~ — COMPLETE; **TP=2 is best practice** → [`BEST_PRACTICE.md`](BEST_PRACTICE.md)  
+3. **Optimization** — fused MoE quality (TP=2/4/8) → P4 serve → P6 131k  
 
 **Standing rule:** never publish a performance claim from a single TP; always include the TP=2/4/8 table for that recipe.

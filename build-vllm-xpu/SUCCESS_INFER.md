@@ -19,7 +19,7 @@ gpt-oss-120b inference on the self-built Torch-XPU + IPEX + oneCCL + vLLM stack 
 | `TRITON_INTEL_DEVICE_EXTENSIONS` | `cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions` |
 | `VLLM_XPU_FUSED_MOE_USE_REF` | `1` (fused XPU MXFP4 MoE alone → all `!`) |
 | Attention | `attention_backend="TRITON_ATTN"` |
-| TP | 8 |
+| TP | **8** (historical PASS). **Current best practice: TP=2** — see [`BEST_PRACTICE.md`](BEST_PRACTICE.md) |
 | Other | `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `TORCHDYNAMO_DISABLE=1`, `TORCH_COMPILE_DISABLE=1`, `CCL_WORKER_COUNT=1`, unset `SYCL_CACHE_PERSISTENT`, durable `$WORKDIR/.cache/{triton,sycl}_xpu_gptoss` (aligned with `bench_perf_persist.pbs`) |
 | Triton patch | `triton/backends/intel/driver.c` — OpenCL twin-device probe wrapped in try/catch (see `build-vllm-xpu/patches/triton_intel_driver_opencl_optional.txt`) |
 

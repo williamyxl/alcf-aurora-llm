@@ -81,18 +81,20 @@ def main():
     print(prompt)
     print("=== loading model ===")
     print("about_to_construct_LLM", flush=True)
+    # Best practice 2026-07-21: TP=2 ≫ TP=8 for BS=1 REF MoE (see BEST_PRACTICE.md).
+    # Pin KV to avoid util-planner OOM on small TP (weights ~31 GiB/tile).
     llm = LLM(
         model=MODEL,
-        tensor_parallel_size=8,
+        tensor_parallel_size=2,
         dtype="bfloat16",
         trust_remote_code=True,
         max_model_len=4096,
         enforce_eager=True,
         enable_prefix_caching=False,
         disable_custom_all_reduce=True,
-        # Leave headroom for sampler warmup (256 dummy seqs OOMs at default 0.92).
         gpu_memory_utilization=0.82,
-        max_num_seqs=16,
+        max_num_seqs=2,
+        kv_cache_memory_bytes=8 * (1 << 30),
         # FLASH_ATTN decode garbles gpt-oss on XPU; Triton attn is the workaround.
         attention_backend="TRITON_ATTN",
         # P7: enable RequestStateStats (TTFT / prefill / decode).
