@@ -9,6 +9,7 @@ Living experiment + hypothesis/solution log for Aurora PVC (self-built vLLM-XPU 
 **P7 PASS** — job **8681016**.  
 **TP=2/4/8 scaling COMPLETE** — see [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md): **TP=2 best** (warm2 e2e **1.15** tok/s) ≫ TP=4 (0.66) ≫ TP=8 (0.37).  
 **Next:** fused MoE quality campaign (`bench_perf_moe_fused{,_tp2,_tp4}.pbs`) with full TP=2/4/8 + quality gate.  
+**Fused campaign submitted 2026-07-21:** TP=4 **8681117** (`debug`), TP=2 **8681118** (`debug-scaling`); TP=8 `bench_perf_moe_fused.pbs` after slots free.  
 **Standing rule:** every future perf campaign runs **TP=2/4/8** with P7 fields.
 
 ## P7 — engine TTFT / prefill / decode — PASS (8681016)

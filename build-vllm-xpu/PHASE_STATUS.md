@@ -123,4 +123,4 @@ phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~
 
 phase=perf status=IN_PROGRESS date=2026-07-21T04:12:00+00:00 notes: Resumed. P7 validation job submitted (bench_perf.pbs). Next: TP=2/4/8 scaling with KV pin, then fused-MoE quality / serve / P6.
 
-phase=perf status=IN_PROGRESS date=2026-07-21T06:05:00+00:00 notes: BEST_PRACTICE.md written — TP=2 recommended (warm2 e2e 1.15). Scaling COMPLETE. Next: fused MoE quality TP=2/4/8 (bench_perf_moe_fused{,_tp2,_tp4}.pbs). one_chat.py default TP=2+KV pin.
+phase=perf status=IN_PROGRESS date=2026-07-21T06:10:00+00:00 notes: BEST_PRACTICE.md + TP=2 default committed (32bd259). Fused MoE quality campaign queued: TP4=8681117 TP2=8681118; TP8 follows. Push pending (no GitHub creds on Aurora login).
