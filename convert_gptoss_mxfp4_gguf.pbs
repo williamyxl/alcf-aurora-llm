@@ -1,0 +1,48 @@
+#!/bin/bash -l
+# Convert local OpenAI MXFP4 HF checkpoint → GGUF for llama.cpp.
+# Checkpoint policy: MXFP4 only (models/openai-gpt-oss-120b).
+#
+# Submit after build: qsub convert_gptoss_mxfp4_gguf.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-mxfp4-gguf
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/convert.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export SRC=$LLAMA_ROOT/llama.cpp
+export ENV=$WORKDIR/build-vllm-xpu/env
+export HF_MODEL=$WORKDIR/models/openai-gpt-oss-120b
+export OUT_GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+conda activate "$ENV"
+
+echo "host=$(hostname)"
+echo "date=$(date -Is)"
+echo "HF_MODEL=$HF_MODEL"
+ls "$HF_MODEL/config.json"
+test -f "$SRC/convert_hf_to_gguf.py"
+
+# Native MXFP4 HF → GGUF (auto detects mxfp4; do not re-quantize to Q4/Q8)
+# conversion/gpt_oss.py repacks expert blocks/scales to ggml MXFP4
+export PYTHONPATH="$SRC/gguf-py:${PYTHONPATH:-}"
+python "$SRC/convert_hf_to_gguf.py" "$HF_MODEL" \
+  --outfile "$OUT_GGUF" \
+  --outtype auto \
+  --use-temp-file \
+  2>&1 | tee "$LLAMA_ROOT/logs/convert_hf_to_gguf.log"
+
+ls -lh "$OUT_GGUF"
+echo "date=$(date -Is)"
+echo "CONVERT_OK=1"

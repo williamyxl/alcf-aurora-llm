@@ -98,16 +98,20 @@ Full table + notes: [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md).
 
 ---
 
-## Explicitly not best practice (yet)
+## Explicitly not best practice (failed / discarded)
+
+Full ledger: [`perf-team/FAILED_ATTEMPTS.md`](perf-team/FAILED_ATTEMPTS.md).
 
 | Path | Status |
 |------|--------|
-| Fused MXFP4 MoE (REF unset) | ~1.47 tok/s @ TP=8 historically; **quality FAIL** — under investigation |
+| Fused MXFP4 MoE TP=2/4/8 | ~5.2 decode @ TP=2; **quality FAIL** all TP — `FUSED_MOE_QUALITY.md` |
+| Unquant BF16/FP16 MoE | ~3 decode @ BF16 TP=4; **quality FAIL**; TP2 OOM — `HALFPREC_TP248.md` |
 | `VLLM_XPU_FUSED_MOE_USE_MXFP4_FP8=1` | Same quality FAIL |
 | `enforce_eager=False` | No speed win vs eager REF |
-| TP=8 as default for single-stream | Slower; keep only for historical compare / multi-tile headroom experiments |
+| TP=8 as default for single-stream | Slower under REF |
 | TP=12 | Invalid for this model |
 | OpenCL in device selector | SEGV |
+| `module load frameworks` | No usable causal / gpt-oss path for this project |
 
 ---
 
@@ -121,3 +125,4 @@ Full table + notes: [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md).
 | `PERF.md` | Living experiment log |
 | `RESUME.md` | Cold-session recovery |
 | `perf-team/SCALING_TP248.md` | TP=2/4/8 campaign tables |
+| `perf-team/FAILED_ATTEMPTS.md` | Failed campaigns ledger |

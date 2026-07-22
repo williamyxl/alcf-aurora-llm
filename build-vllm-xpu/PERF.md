@@ -7,10 +7,30 @@ Living experiment + hypothesis/solution log for Aurora PVC (self-built vLLM-XPU 
 
 **Resumed 2026-07-21** — [`RESUME.md`](RESUME.md).  
 **P7 PASS** — job **8681016**.  
-**TP=2/4/8 scaling COMPLETE** — see [`perf-team/SCALING_TP248.md`](perf-team/SCALING_TP248.md): **TP=2 best** (warm2 e2e **1.15** tok/s) ≫ TP=4 (0.66) ≫ TP=8 (0.37).  
-**Next:** fused MoE quality campaign (`bench_perf_moe_fused{,_tp2,_tp4}.pbs`) with full TP=2/4/8 + quality gate.  
-**Fused campaign submitted 2026-07-21:** TP=4 **8681117** (`debug`), TP=2 **8681118** (`debug-scaling`); TP=8 `bench_perf_moe_fused.pbs` after slots free.  
-**Standing rule:** every future perf campaign runs **TP=2/4/8** with P7 fields.
+**TP=2/4/8 REF scaling COMPLETE** — [`SCALING_TP248.md`](perf-team/SCALING_TP248.md): TP=2 best (**1.15** e2e).  
+**Failed campaigns (document):** fused MXFP4 + BF16/FP16 unquant — both quality FAIL; see [`FAILED_ATTEMPTS.md`](perf-team/FAILED_ATTEMPTS.md).  
+**Casting hypothesis killed:** half-prec ~3 tok/s max, still all-`!`.  
+**Checkpoint policy:** **MXFP4 only** (`models/openai-gpt-oss-120b`) — no more BF16/FP16.  
+**Next:** llama.cpp SYCL compile-from-scratch — [`../build-llamacpp-sycl/README.md`](../build-llamacpp-sycl/README.md).  
+**Standing rule:** every future vLLM perf campaign runs **TP=2/4/8** with P7 fields.
+
+## Failed — BF16/FP16 unquant MoE (2026-07-21)
+
+Downloaded community BF16/FP16 checkpoints; REF unset; KV pinned by TP. Full table: [`perf-team/HALFPREC_TP248.md`](perf-team/HALFPREC_TP248.md).
+
+| Dtype | TP | Job | warm2 e2e | warm2 decode | quality |
+|-------|----|-----|-----------|--------------|---------|
+| bf16 | 8 | 8681162 | 1.41 | 1.45 | **FAIL** |
+| bf16 | 4 | 8681163 | **2.96** | **2.98** | **FAIL** |
+| fp16 | 8 | 8681177 | 1.51 | 1.58 | **FAIL** |
+| fp16 | 4 | 8681178 | 2.77 | 2.80 | **FAIL** |
+| fp16 | 2 | 8681207 | — | — | **OOM** |
+
+**Verdict:** Discard. Same garbage as fused; not a path to ≫13 tok/s.
+
+## Failed — fused MXFP4 MoE TP=2/4/8 (2026-07-21)
+
+See [`perf-team/FUSED_MOE_QUALITY.md`](perf-team/FUSED_MOE_QUALITY.md). Best ignore-quality speed ~5.2 decode @ TP=2 (8681118); TP=8 job **8681141** warm2 e2e 1.41 / decode 1.46, quality FAIL.
 
 ## P7 — engine TTFT / prefill / decode — PASS (8681016)
 

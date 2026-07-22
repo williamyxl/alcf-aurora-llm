@@ -1,33 +1,34 @@
-# Fused MoE quality campaign — TP=2/4/8
+# Fused MoE quality campaign — TP=2/4/8 (**FAILED quality**)
 
-**Goal:** Find a quality-correct fused / faster MoE path (historically ~1.47 tok/s @ TP=8 but all-`!` / token-id-0).  
-**Rule:** `quality_ok=false` → discard from ranking; keep REF + TP=2 as best practice until a quality win.
+**Goal:** Quality-correct fused MXFP4 MoE (historically ~1.47 tok/s @ TP=8 but all-`!`).  
+**Status:** **CLOSED — FAIL** at every TP. Keep REF + TP=2.
 
 ## Code path (vllm_xpu_kernels)
 
-- Env `VLLM_XPU_FUSED_MOE_USE_REF=1` → `ref_fused_moe` in `moe_utils.py` (dequant + naive GEMM).
-- REF unset + MXFP4 weights → fused recipe `mxfp4` (or `mxfp4_fp8` if `VLLM_XPU_FUSED_MOE_USE_MXFP4_FP8=1`).
-- Source: `site-packages/vllm_xpu_kernels/fused_moe_interface.py` (`_use_ref`, `_get_recipe`).
+- `VLLM_XPU_FUSED_MOE_USE_REF=1` → `ref_fused_moe` (slow, quality OK).
+- REF unset → cutlass grouped GEMM `mxfp4` (faster, quality FAIL).
+- Suspect: half-split `gemm1_clamp_limit` on interleaved gpt-oss SwiGLU (`fused_moe_interface.py` L376–381).
 
 ## Jobs (2026-07-21)
 
-| TP | Script | Job | Queue | Status |
-|----|--------|-----|-------|--------|
-| 2 | `bench_perf_moe_fused_tp2.pbs` | **8681118** | debug-scaling | queued |
-| 4 | `bench_perf_moe_fused_tp4.pbs` | **8681117** | debug | queued |
-| 8 | `bench_perf_moe_fused.pbs` | (submit after 2/4 finish or slot free) | debug | pending |
+| TP | Script | Job | Host | Status |
+|----|--------|-----|------|--------|
+| 2 | `bench_perf_moe_fused_tp2.pbs` | **8681118** | `x4519c0s5b0n0` | **DONE FAIL** |
+| 4 | `bench_perf_moe_fused_tp4.pbs` | **8681117** | `x4400c7s0b0n0` | **DONE FAIL** |
+| 8 | `bench_perf_moe_fused.pbs` | **8681141** | (see log) | **DONE FAIL** |
+| 8 | (hist) | **8680525** | — | FAIL (pre-P7 metrics) |
 
-## Results (fill after PERF_JSON)
+## Results (warm2)
 
-| TP | Job | warm2_e2e | warm2_decode | warm2_ttft | ttft_src | quality_ok | notes |
-|----|-----|-----------|--------------|------------|----------|------------|-------|
-| 2 | 8681118 | | | | | | |
-| 4 | 8681117 | | | | | | |
-| 8 | | | | | | | Historical 8680525: ~1.47 e2e, FAIL |
+| TP | Job | warm2_e2e | warm2_decode | warm2_ttft | ttft_src | quality_ok | text |
+|----|-----|-----------|--------------|------------|----------|------------|------|
+| 2 | 8681118 | **5.10** | **5.17** | 0.53 s | engine | **false** | all-`!` / id0 |
+| 4 | 8681117 | **2.99** | **3.03** | 0.89 s | engine | **false** | all-`!` / id0 |
+| 8 | 8681141 | **1.41** | **1.46** | 3.75 s | engine | **false** | all-`!` / id0 |
+| 8 | 8680525 | ~1.47 | — | — | fallback | **false** | all-`!` / id0 |
 
-## Next if all quality FAIL
+Inverse scaling (TP=2 fastest) like REF; quality fails at every TP.
 
-1. Compare fused vs REF intermediate tensors (single layer / first MoE block) offline if feasible.
-2. Try `mxfp4_fp8` at TP=2 only (already failed @ TP=8).
-3. Check upstream vllm-xpu-kernels issues for MXFP4 accuracy on PVC.
-4. Do **not** change default recipe away from REF+TP=2 without quality_ok.
+## Verdict
+
+**Discard fused MXFP4 for production.** Related half-prec campaign also FAIL — see [`HALFPREC_TP248.md`](HALFPREC_TP248.md). Next fix attempts: clamp-skip / newer kernels (`BETTER_SOLUTIONS.md`).

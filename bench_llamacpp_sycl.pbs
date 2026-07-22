@@ -1,0 +1,52 @@
+#!/bin/bash -l
+# Compat alias → same as smoke_llamacpp_sycl.pbs (MXFP4, same-GPU 2 tiles).
+# Prefer: smoke_llamacpp_sycl.pbs | bench_llamacpp_sycl_perf.pbs
+# See build-llamacpp-sycl/PLAN.md
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N llamacpp-sycl-bench
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/bench.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export BIN=$LLAMA_ROOT/build/bin
+export GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
+export CYCLE=${CYCLE:-compat}
+
+NGL=${NGL:-99}
+N_CTX=${N_CTX:-4096}
+N_PREDICT=${N_PREDICT:-128}
+
+module load oneapi/release/2025.3.1
+# shellcheck source=/dev/null
+source "$LLAMA_ROOT/same_gpu_2tiles.env.sh"
+
+echo "host=$(hostname) date=$(date -Is) CYCLE=$CYCLE"
+test -x "$BIN/llama-cli"
+test -f "$GGUF"
+ls -lh "$GGUF"
+
+PROMPT='What is a metal-organic framework (MOF)? Answer in one short paragraph of clear English.'
+
+"$BIN/llama-cli" \
+  -m "$GGUF" \
+  -p "$PROMPT" \
+  -n "$N_PREDICT" \
+  -c "$N_CTX" \
+  -ngl "$NGL" \
+  -sm layer \
+  --seed 42 \
+  -no-cnv \
+  --jinja \
+  --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+  2>&1 | tee "$LLAMA_ROOT/logs/bench_compat.log"
+
+echo "TILE_PIN_OK=1"

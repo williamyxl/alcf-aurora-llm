@@ -1,0 +1,51 @@
+#!/bin/bash -l
+# Incremental-ish rebuild into alternate tree for MXFP4 MoE SoA reorder (P24).
+# Does NOT wipe the production build/ used by in-flight jobs.
+#
+# Submit: qsub build_llamacpp_sycl_mxfp4_reorder.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N llamacpp-mxfp4-reorder-build
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/build_mxfp4_reorder.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export SRC=$LLAMA_ROOT/llama.cpp
+export BUILD=$LLAMA_ROOT/build-mxfp4-reorder
+export LOGS=$LLAMA_ROOT/logs
+
+mkdir -p "$LOGS" "$BUILD"
+
+module load oneapi/release/2025.3.1
+if [ -f "$WORKDIR/build-vllm-xpu/env/bin/cmake" ]; then
+  export PATH="$WORKDIR/build-vllm-xpu/env/bin:$PATH"
+fi
+
+echo "host=$(hostname) date=$(date -Is)"
+echo "git=$(cd "$SRC" && git rev-parse --short HEAD) $(cd "$SRC" && git log -1 --oneline)"
+echo "BUILD=$BUILD (alternate; production build/ untouched)"
+
+cmake -S "$SRC" -B "$BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_SYCL=ON \
+  -DGGML_SYCL_F16=ON \
+  -DGGML_SYCL_DEVICE_ARCH=pvc \
+  -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DLLAMA_BUILD_TESTS=OFF \
+  -DLLAMA_BUILD_EXAMPLES=ON \
+  -DLLAMA_BUILD_SERVER=ON
+
+cmake --build "$BUILD" -j "$(nproc)"
+
+ls -lh "$BUILD/bin/llama-completion" "$BUILD/bin/llama-bench"
+"$BUILD/bin/llama-completion" --help 2>&1 | head -3 || true
+echo "BUILD_OK=1 TREE=build-mxfp4-reorder date=$(date -Is)"
