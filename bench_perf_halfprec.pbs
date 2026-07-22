@@ -1,0 +1,105 @@
+#!/bin/bash -l
+# Half-precision (BF16/FP16) unquantized MoE benches — bypass MXFP4.
+# Weights ~218 GiB → adjust KV by TP (tile HBM ~64 GiB):
+#   TP=8: ~27 GiB/tile → KV 8 GiB
+#   TP=4: ~54 GiB/tile → KV 4 GiB (tight)
+#   TP=2: ~109 GiB/tile → likely OOM; KV 1 GiB (document failure)
+#
+# Submit examples:
+#   qsub -q debug -N gpt-bf16-tp8 -v DTYPE=bf16,TP=8,KV_GIB=8 bench_perf_halfprec.pbs
+#   qsub -q debug-scaling -N gpt-bf16-tp4 -v DTYPE=bf16,TP=4,KV_GIB=4 bench_perf_halfprec.pbs
+#   qsub -q debug -N gpt-fp16-tp8 -v DTYPE=fp16,TP=8,KV_GIB=8 bench_perf_halfprec.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_halfprec.out
+#PBS -j oe
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$BUILD/logs
+
+DTYPE=${DTYPE:-bf16}
+TP=${TP:-8}
+KV_GIB=${KV_GIB:-8}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-2}
+
+case "$DTYPE" in
+  bf16)
+    MODEL=$WORKDIR/models/openai-gpt-oss-120b-bf16
+    VLLM_DTYPE=bfloat16
+    MOE_LABEL=unquant_bf16
+    ;;
+  fp16)
+    MODEL=$WORKDIR/models/openai-gpt-oss-120b-fp16
+    VLLM_DTYPE=float16
+    MOE_LABEL=unquant_fp16
+    ;;
+  *)
+    echo "DTYPE must be bf16 or fp16, got: $DTYPE" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$LOGS"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"
+# Unquantized MoE — do NOT force REF (that path is for MXFP4 quality escape)
+unset VLLM_XPU_FUSED_MOE_USE_REF
+unset VLLM_XPU_FUSED_MOE_USE_MXFP4_FP8
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export CCL_PROCESS_LAUNCHER=hydra
+export CCL_ZE_IPC_EXCHANGE=sockets
+export CCL_WORKER_COUNT=1
+unset SYCL_CACHE_PERSISTENT
+
+JOBTAG=${PBS_JOBID:-$$}
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_half_${JOBTAG}
+export TRITON_CACHE_DIR=$TMPDIR/triton_cache_half_${JOBTAG}
+mkdir -p "$SYCL_CACHE_DIR" "$TRITON_CACHE_DIR"
+
+echo "host=$(hostname)"
+echo "date=$(date)"
+echo "campaign=halfprec DTYPE=$DTYPE TP=$TP KV_GIB=$KV_GIB MODEL=$MODEL"
+echo "TRITON_CACHE_DIR=$TRITON_CACHE_DIR"
+test -f "$MODEL/config.json" || { echo "MISSING model config: $MODEL"; exit 1; }
+module list | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+python -c "import torch, vllm, vllm_xpu_kernels._C, vllm_xpu_kernels._moe_C; print('torch', torch.__version__); print('vllm', vllm.__version__); print('kernels_ops_ok')"
+mpiexec -n 1 --ppn 1 python -c "import torch; print('xpu_count', torch.xpu.device_count())"
+
+mpiexec -n 1 --ppn 1 python triton_xpu_smoke.py || {
+  echo "triton_xpu_smoke FAILED — aborting"
+  exit 1
+}
+
+export PYTHONFAULTHANDLER=1
+mpiexec -n 1 --ppn 1 python bench_perf.py \
+  --model "$MODEL" \
+  --dtype "$VLLM_DTYPE" \
+  --tp "$TP" \
+  --max-tokens 128 \
+  --moe-mode "$MOE_LABEL" \
+  --gpu-memory-utilization 0.82 \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --kv-cache-memory-gib "$KV_GIB"
+
+echo "date=$(date)"

@@ -58,10 +58,37 @@ build-vllm-xpu/llvm-*/
 !bench_perf_tp2.pbs
 !bench_perf_tp4.pbs
 !bench_perf_ctx131k.pbs
+!bench_perf_halfprec.pbs
+!download_gptoss_bf16_fp16.sh
+
+# llama.cpp SYCL (Aurora escape hatch) — PBS + helpers at repo root
+!build_llamacpp_sycl.pbs
+!build_llamacpp_sycl_mxfp4_reorder.pbs
+!convert_gptoss_mxfp4_gguf.pbs
+!download_gptoss_mxfp4_gguf.pbs
+!download_gptoss_mxfp4_gguf.sh
+!smoke_llamacpp_sycl.pbs
+!bench_llamacpp_sycl.pbs
+!bench_llamacpp_sycl_perf.pbs
+!bench_llamacpp_sycl_phaseG.pbs
 
 # Training
 !train_lora_smoke.pbs
 !lora_one_epoch.py
+
+# build-llamacpp-sycl: docs, cycle envs, harness scripts only
+# (no llama.cpp clone, build/, logs/)
+!build-llamacpp-sycl/
+build-llamacpp-sycl/*
+!build-llamacpp-sycl/*.md
+!build-llamacpp-sycl/*.sh
+!build-llamacpp-sycl/cycles/
+build-llamacpp-sycl/cycles/*
+!build-llamacpp-sycl/cycles/*.env
+build-llamacpp-sycl/llama.cpp/
+build-llamacpp-sycl/build/
+build-llamacpp-sycl/build-mxfp4-reorder/
+build-llamacpp-sycl/logs/
 
 # build-vllm-xpu: only pins, docs, patches
 !build-vllm-xpu/

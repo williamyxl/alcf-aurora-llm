@@ -1,0 +1,70 @@
+#!/bin/bash -l
+# Build llama.cpp with Intel SYCL from scratch (Aurora Max 1550 / PVC).
+#
+# Submit: qsub build_llamacpp_sycl.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N llamacpp-sycl-build
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/build.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export SRC=$LLAMA_ROOT/llama.cpp
+export BUILD=$LLAMA_ROOT/build
+export LOGS=$LLAMA_ROOT/logs
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+
+mkdir -p "$LOGS" "$BUILD"
+
+module load oneapi/release/2025.3.1
+
+# Prefer conda cmake/ninja if present; else system
+if [ -f "$WORKDIR/build-vllm-xpu/env/bin/cmake" ]; then
+  export PATH="$WORKDIR/build-vllm-xpu/env/bin:$PATH"
+fi
+
+echo "host=$(hostname)"
+echo "date=$(date -Is)"
+echo "icpx=$(icpx --version 2>&1 | head -1)"
+echo "cmake=$(cmake --version | head -1)"
+echo "MKLROOT=${MKLROOT:-unset}"
+echo "SRC=$SRC"
+test -d "$SRC/.git"
+
+cd "$SRC"
+echo "git=$(git rev-parse HEAD) $(git log -1 --oneline)"
+
+# Fresh configure
+rm -rf "$BUILD"
+cmake -S "$SRC" -B "$BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_SYCL=ON \
+  -DGGML_SYCL_F16=ON \
+  -DGGML_SYCL_DEVICE_ARCH=pvc \
+  -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DLLAMA_BUILD_TESTS=OFF \
+  -DLLAMA_BUILD_EXAMPLES=ON \
+  -DLLAMA_BUILD_SERVER=ON
+
+cmake --build "$BUILD" -j "$(nproc)"
+
+echo "=== binaries ==="
+ls -lh "$BUILD/bin/llama-cli" "$BUILD/bin/llama-server" "$BUILD/bin/llama-bench" 2>/dev/null || \
+  ls -lh "$BUILD/bin/" | head -40
+
+echo "=== sycl backend sanity (no GPU needed for --help) ==="
+"$BUILD/bin/llama-cli" --help 2>&1 | head -5 || true
+
+echo "date=$(date -Is)"
+echo "BUILD_OK=1"

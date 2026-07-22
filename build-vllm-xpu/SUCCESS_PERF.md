@@ -93,8 +93,11 @@ Valid TP for 64 heads: 1, 2, 4, 8, 16, … — **not 12**.
 |------|--------|
 | **P7** true TTFT / prefill / decode | **PASS** (8681016) |
 | **TP=2/4/8 scaling** with P7 + KV pin | **COMPLETE** — TP=2 best; see `BEST_PRACTICE.md` |
-| Fused MoE quality (path to ≫1.15 tok/s quality-ok) | **in progress** |
-| **P4** serve / concurrent | after fused MoE |
+| Fused MoE quality (path to ≫1.15 tok/s quality-ok) | **FAILED** TP=2/4/8 — see `FUSED_MOE_QUALITY.md` |
+| BF16/FP16 unquant MoE | **FAILED** quality (~3 tok/s max) — `HALFPREC_TP248.md` / `FAILED_ATTEMPTS.md` |
+| Cast/upcast-as-bottleneck hypothesis | **Killed** |
+| Clamp-skip / newer kernels | next — `BETTER_SOLUTIONS.md` (no frameworks module) |
+| **P4** serve / concurrent | after a quality-OK fast path |
 | **P6** `max_model_len=131072` | include TP=2/4/8 |
 
 Default context stays `4096`.

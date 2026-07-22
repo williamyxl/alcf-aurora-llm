@@ -42,6 +42,19 @@ bench_perf_tp12.pbs
 bench_perf_tp2.pbs
 bench_perf_tp4.pbs
 bench_perf_ctx131k.pbs
+bench_perf_halfprec.pbs
+download_gptoss_bf16_fp16.sh
+
+# llama.cpp SYCL (root PBS / helpers)
+build_llamacpp_sycl.pbs
+build_llamacpp_sycl_mxfp4_reorder.pbs
+convert_gptoss_mxfp4_gguf.pbs
+download_gptoss_mxfp4_gguf.pbs
+download_gptoss_mxfp4_gguf.sh
+smoke_llamacpp_sycl.pbs
+bench_llamacpp_sycl.pbs
+bench_llamacpp_sycl_perf.pbs
+bench_llamacpp_sycl_phaseG.pbs
 
 # training
 train_lora_smoke.pbs
@@ -60,6 +73,11 @@ build-vllm-xpu/PERF.md
 build-vllm-xpu/RESUME.md
 build-vllm-xpu/perf-team/*.md
 build-vllm-xpu/patches/
+
+# llama.cpp SYCL campaign (docs + cycle envs + harness; no clone/build/logs)
+build-llamacpp-sycl/*.md          # includes CYCLE_LOG.md, PLAN.md, BEST_RECIPE.md
+build-llamacpp-sycl/*.sh
+build-llamacpp-sycl/cycles/*.env
 ```
 
 ## Do not track
@@ -73,6 +91,9 @@ build-vllm-xpu/patches/
 | `build-vllm-xpu/build-src/` | source trees |
 | `build-vllm-xpu/frameworks-standalone/` | recipe clone |
 | `build-vllm-xpu/logs/`, `*.out` | job output |
+| `build-llamacpp-sycl/llama.cpp/` | nested clone |
+| `build-llamacpp-sycl/build*/` | SYCL build trees |
+| `build-llamacpp-sycl/logs/` | job output |
 | `.cache/` | HF/torch caches |
 | `diag_*`, `triton_diag.pbs` | one-off bring-up probes |
 

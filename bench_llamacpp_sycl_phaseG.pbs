@@ -1,0 +1,21 @@
+#!/bin/bash -l
+# Phase G: max N_CTX stress. Queues: debug / debug-scaling only (max 59m — no capacity).
+#
+# Submit:
+#   qsub -q debug-scaling -v CYCLE=G0 -N ll-G0 -o .../logs/perf_G0.out bench_llamacpp_sycl_phaseG.pbs
+#   qsub -q debug         -v CYCLE=G1 -N ll-G1 -o .../logs/perf_G1.out bench_llamacpp_sycl_phaseG.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N llamacpp-phaseG
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/perf_phaseG.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+exec bash "$WORKDIR/bench_llamacpp_sycl_perf.pbs"

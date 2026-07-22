@@ -124,3 +124,15 @@ phase=perf status=PAUSED date=2026-07-20T18:00:00+00:00 notes: S2–S5 closed (~
 phase=perf status=IN_PROGRESS date=2026-07-21T04:12:00+00:00 notes: Resumed. P7 validation job submitted (bench_perf.pbs). Next: TP=2/4/8 scaling with KV pin, then fused-MoE quality / serve / P6.
 
 phase=perf status=IN_PROGRESS date=2026-07-21T06:10:00+00:00 notes: BEST_PRACTICE.md + TP=2 default committed (32bd259). Fused MoE quality campaign queued: TP4=8681117 TP2=8681118; TP8 follows. Push pending (no GitHub creds on Aurora login).
+
+phase=perf status=IN_PROGRESS date=2026-07-21T07:25:00+00:00 notes: Halfprec BF16/FP16 campaign started. bf16 TP8=8681162 (KV8) TP4=8681163 (KV4). FP16+TP2 chained when Q slots free. REF unset.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T09:05:00+00:00 notes: Documented FAILED fused MoE + BF16/FP16 halfprec (quality FAIL; casting hypothesis killed). Ledger: perf-team/FAILED_ATTEMPTS.md. Next: clamp-skip/newer kernels; no frameworks module.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T09:15:00+00:00 notes: Policy: stay on MXFP4 checkpoint only. Starting llama.cpp SYCL from-scratch build (build_llamacpp_sycl.pbs). Src pin ggml-org/llama.cpp@76f46ad.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T09:31:00+00:00 notes: llama.cpp SYCL BUILD OK @76f46ad (GGML_SYCL+F16+pvc AOT). Next: convert MXFP4 HF->GGUF (convert_gptoss_mxfp4_gguf.pbs) then bench_llamacpp_sycl.pbs.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T09:35:00+00:00 notes: llama.cpp PLAN locked: MXFP4 only + same-GPU 2 tiles (ZE_AFFINITY_MASK=0.0,0.1 COMPOSITE). Iterate smoke then perf to >30 tok/s or 100 cycles. See build-llamacpp-sycl/PLAN.md. Convert job 8681247 still Q.
+
+phase=perf status=IN_PROGRESS date=2026-07-21T14:47:00+00:00 notes: MXFP4 GGUF CONVERT_OK (61G). Smoke S1 submitted job 8681486 (same-GPU 2 tiles). Next: quality then perf toward >30 tok/s.

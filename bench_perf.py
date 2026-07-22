@@ -15,7 +15,9 @@ import vllm_xpu_kernels._moe_C  # noqa: F401
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-MODEL = "/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/models/openai-gpt-oss-120b"
+DEFAULT_MODEL = (
+    "/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/models/openai-gpt-oss-120b"
+)
 
 MESSAGES = [
     {
@@ -224,7 +226,20 @@ def main():
         help="if set, pass kv_cache_memory_bytes=GiB*2^30 (bypasses util-based KV planner; "
         "needed on XPU when util over-allocates KV on top of large TP weight shards)",
     )
+    ap.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="HF model dir (default: MXFP4 openai-gpt-oss-120b)",
+    )
+    ap.add_argument(
+        "--dtype",
+        default="bfloat16",
+        choices=("bfloat16", "float16", "auto"),
+        help="vLLM dtype (use float16 for FP16 checkpoints)",
+    )
     args = ap.parse_args()
+    model_path = args.model
+    dtype = args.dtype
 
     moe_mode = args.moe_mode
     if moe_mode is None:
@@ -232,10 +247,12 @@ def main():
             moe_mode = "ref"
         elif os.environ.get("VLLM_XPU_FUSED_MOE_USE_MXFP4_FP8", "") == "1":
             moe_mode = "mxfp4_fp8"
+        elif "bf16" in model_path.lower() or "fp16" in model_path.lower():
+            moe_mode = "unquant_" + ("fp16" if "fp16" in model_path.lower() else "bf16")
         else:
             moe_mode = "fused"
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     prompt, n_prompt_tokens = build_prompt(
         tokenizer,
         prefill_tokens=args.prefill_tokens,
@@ -256,8 +273,8 @@ def main():
     if args.kv_cache_memory_gib is not None:
         kv_bytes = int(args.kv_cache_memory_gib * (1 << 30))
     print(
-        f"about_to_construct_LLM tp={args.tp} moe_mode={moe_mode} "
-        f"max_model_len={args.max_model_len} "
+        f"about_to_construct_LLM model={model_path} tp={args.tp} moe_mode={moe_mode} "
+        f"dtype={dtype} max_model_len={args.max_model_len} "
         f"enforce_eager={args.enforce_eager} "
         f"gpu_memory_utilization={args.gpu_memory_utilization} "
         f"max_num_seqs={args.max_num_seqs} "
@@ -265,9 +282,9 @@ def main():
         flush=True,
     )
     llm_kwargs = dict(
-        model=MODEL,
+        model=model_path,
         tensor_parallel_size=args.tp,
-        dtype="bfloat16",
+        dtype=dtype,
         trust_remote_code=True,
         max_model_len=args.max_model_len,
         enforce_eager=args.enforce_eager,
@@ -295,9 +312,10 @@ def main():
 
     perf = {
         "n_tiles": args.tp,
+        "model": model_path,
         "moe_mode": moe_mode,
         "attn": "TRITON_ATTN",
-        "dtype": "bfloat16",
+        "dtype": dtype,
         "max_tokens": args.max_tokens,
         "max_model_len": args.max_model_len,
         "enforce_eager": args.enforce_eager,
