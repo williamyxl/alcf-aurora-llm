@@ -332,6 +332,29 @@ qsub -q debug         -v CYCLE=G1 -N ll-G1 -o build-llamacpp-sycl/logs/perf_G1.o
 
 ---
 
+## Phase H — MoE on Xeon Max HBM only (`--membind=2`) — **also on Inkling**
+
+Cross-model twin of Inkling `MO_HBM` / `C_MO_HBM`. Force MoE host pages onto sock0 **HBM** (NUMA **2**), not DDR5.
+
+| Cycle | Baseline | Change |
+|-------|----------|--------|
+| **F4_hbm** | F4h (`--preferred=2`) | `--membind=2` |
+| **G1_hbm** | G1 (`--membind=0` DDR) | `--membind=2` |
+
+```bash
+numactl --physcpubind=1-51,105-155 --membind=2 \
+  llama-completion ... -ngl 99 -sm none -fa on -ncmoe 99 -t 32 --numa numactl --no-mmap
+```
+
+gpt-oss MoE ~50–60 G may fit in 64 G HBM; Inkling UD-IQ1_S may OOM — still log metrics either way.
+
+```bash
+qsub -q debug -v CYCLE=F4_hbm -N ll-F4_hbm -o build-llamacpp-sycl/logs/perf_F4_hbm.out bench_llamacpp_sycl_perf.pbs
+qsub -q debug -v CYCLE=G1_hbm -N ll-G1_hbm -o build-llamacpp-sycl/logs/perf_G1_hbm.out bench_llamacpp_sycl_phaseG.pbs
+```
+
+---
+
 ## Performance plan (living)
 
 | Field | Current |
@@ -342,7 +365,7 @@ qsub -q debug         -v CYCLE=G1 -N ll-G1 -o build-llamacpp-sycl/logs/perf_G1.o
 | Best quality | PASS (MOF) on F* and G* |
 | Recipe (2-tile short) | `FLAT 0,1` + VMM=0 + `-sm tensor` + `-fa on` + `-ts 0.5/0.5` |
 | Recipe (1-tile MoE) | `FLAT 0` + `-ncmoe 99` + `numactl --physcpubind=1-51,105-155 --membind=0` (+ optional `--preferred=2`) |
-| Campaign | **Phase F + G complete** (debug queues) |
+| Campaign | **Phase F + G complete**; **Phase H** (HBM `--membind=2`) pending — also on Inkling |
 
 Update this table every cycle.
 
@@ -370,8 +393,9 @@ Update this table every cycle.
 1. One independent variable per cycle.  
 2. Phase A–E: MXFP4 + same-GPU **2 tiles**, no MoE-CPU.  
 3. Phase F: MXFP4 + **1 tile** + MoE weights on CPU + **local-DDR NUMA** (except F0 unbound baseline).  
-4. Phase G (**final**): max `N_CTX` · G0 2-tile vs G1 1-tile MoE→CPU (**G1 NUMA required**) · record full metrics.  
-5. Quality before speed ranking.  
-6. Append **full** cycle row to `CYCLE_LOG.md` before submitting next job.  
-7. Cap **100** cycles.  
-8. **Login node:** no long-lived monitors (`nohup`, sleep loops). Use one-shot `harvest_once.sh` or agent `qstat` on demand.
+4. Phase G: max `N_CTX` · G0 2-tile vs G1 1-tile MoE→CPU (**G1 NUMA required**) · record full metrics.  
+5. Phase H (**cross-model with Inkling**): MoE→CPU with **`--membind=2`** (Xeon Max HBM only, not DDR5) — short `F4_hbm` + long `G1_hbm`.  
+6. Quality before speed ranking.  
+7. Append **full** cycle row to `CYCLE_LOG.md` before submitting next job.  
+8. Cap **100** cycles.  
+9. **Login node:** no long-lived monitors (`nohup`, sleep loops). Use one-shot `harvest_once.sh` or agent `qstat` on demand.

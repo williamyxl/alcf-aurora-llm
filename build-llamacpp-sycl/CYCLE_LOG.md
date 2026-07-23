@@ -101,4 +101,12 @@ Queues: **debug / debug-scaling only**. G0/G1 used `N_CTX=131072` + `FILL_CTX_TO
 
 **Phase G verdict:** At max `N_CTX=131072` (8k prompt), **1-tile MoE→CPU + sock0 NUMA (G1) gen=32.66** beats **2-tile pure GPU (G0) gen=28.61**. Prefill favors 2-tile. Quality PASS on all arms.
 
-**Campaign complete** (Phase F + G). Best recipes frozen in [`BEST_RECIPE.md`](BEST_RECIPE.md).
+### Phase H — MoE on Xeon Max HBM only (`--membind=2`) — **shared with Inkling**
+Same final NUMA stress as Inkling `MO_HBM` / `C_MO_HBM`: force MoE host pages onto sock0 HBM (NUMA **2**), not DDR5 (`membind=0`) or HBM-*preferred* (`preferred=2`).
+
+| Cycle | Ctx | Recipe | TTFT_ms | prefill_tps | gen_tps | quality | notes |
+|-------|-----|--------|--------:|------------:|--------:|---------|-------|
+| **F4_hbm** | short | `--membind=2` | **238.96** | **83.70** | **34.32** | PASS | **best short decode**; beats F4h 33.78; llama-bench hung → qdel; completion authoritative |
+| **G1_hbm** | 131072 | `--membind=2` | **18244** | **319.94** | **31.97** | PASS | completion authoritative; llama-bench hung → qdel (same as F4_hbm); vs G1 DDR gen=32.66 |
+
+**Phase H complete:** short-ctx prefers HBM bind (**34.32**); long-ctx prefers DDR G1 (**32.66** > G1_hbm **31.97**).
