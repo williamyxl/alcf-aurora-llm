@@ -9,7 +9,7 @@ LLAMA=$ROOT/build-llamacpp-sycl
 PBS=$ROOT/bench_llamacpp_sycl_perf.pbs
 PBS_G=$ROOT/bench_llamacpp_sycl_phaseG.pbs
 LOGS=$LLAMA/logs
-PRIORITY=(G0 G1 G0s G1s G0t G1t)
+PRIORITY=(F4_hbm G1_hbm)
 SUBMIT=0
 [[ "${1:-}" == "--submit" ]] && SUBMIT=1
 
