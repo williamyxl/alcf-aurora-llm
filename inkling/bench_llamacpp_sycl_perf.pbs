@@ -1,0 +1,258 @@
+#!/bin/bash -l
+# Perf: llama.cpp SYCL + MXFP4 on 2 tiles of the SAME GPU.
+# Target: decode/gen >= 30 tok/s. PLAN.md Phase D/E.
+#
+# ALWAYS records (via non-interactive llama-completion --single-turn):
+#   TTFT_MS, PREFILL_TPS, GEN_TPS
+# Optional llama-bench if walltime remains (RUN_BENCH=1).
+#
+# Submit: qsub -v CYCLE=P7 -o .../perf_P7.out bench_llamacpp_sycl_perf.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-perf
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/perf.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export BIN=$LLAMA_ROOT/build/bin
+export GGUF=${GGUF:-$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf}
+export CYCLE=${CYCLE:-P0}
+CYCLE_ENV=${CYCLE_ENV:-$LLAMA_ROOT/cycles/${CYCLE}.env}
+
+module load oneapi/release/2025.3.1
+
+if [ -f "$CYCLE_ENV" ]; then
+  echo "sourcing $CYCLE_ENV (after oneapi module)"
+  set -a
+  # shellcheck disable=SC1090
+  source "$CYCLE_ENV"
+  set +a
+fi
+
+NGL=${NGL:-99}
+N_CTX=${N_CTX:-2048}
+N_PREDICT=${N_PREDICT:-128}
+N_PP=${N_PP:-512}
+SPLIT_MODE=${SPLIT_MODE:-layer}
+MEASURE_TTFT=${MEASURE_TTFT:-1}
+RUN_BENCH=${RUN_BENCH:-1}
+BENCH_REPS=${BENCH_REPS:-1}
+# Skip bench if TTFT phase already used this many seconds (leave ~25m for bench load)
+BENCH_DEADLINE_S=${BENCH_DEADLINE_S:-2000}
+EXTRA_ARGS=${EXTRA_ARGS:-}
+EXE=${EXE:-$BIN/llama-completion}
+# Optional knobs (also applied to completion, not only bench)
+N_THREADS=${N_THREADS:-}
+MAIN_GPU=${MAIN_GPU:-}
+
+# shellcheck source=/dev/null
+source "$LLAMA_ROOT/same_gpu_2tiles.env.sh"
+
+# Optional: source MoE host NUMA defaults when cycle asks for it
+if [ "${NUMACTL_ENABLE:-0}" = "1" ] && [ -z "${NUMACTL_ARGS:-}" ]; then
+  # shellcheck source=/dev/null
+  source "$LLAMA_ROOT/numa_moe_host.env.sh"
+fi
+
+# Build shared CLI extras once (completion + bench must match for -ts/-t/-mg)
+CLI_EXTRA=()
+case " $EXTRA_ARGS " in
+  *" -fa on "*|*" --flash-attn on "*) CLI_EXTRA+=(-fa on) ;;
+  *" -fa off "*|*" --flash-attn off "*) CLI_EXTRA+=(-fa off) ;;
+esac
+# Pass through other EXTRA_ARGS except -fa (already handled) to avoid double -fa
+_EXTRA_STRIP=$(echo " $EXTRA_ARGS " | sed -E 's/ --?flash-attn(=| )+(on|off) / /g; s/ -fa(=| )+(on|off) / /g')
+# shellcheck disable=SC2206
+_EXTRA_ARR=( $_EXTRA_STRIP )
+for _a in "${_EXTRA_ARR[@]}"; do
+  [ -n "$_a" ] && CLI_EXTRA+=("$_a")
+done
+if [ -n "${TENSOR_SPLIT:-}" ]; then
+  TS_ARG=${TENSOR_SPLIT//,//}
+  CLI_EXTRA+=(-ts "$TS_ARG")
+  echo "TENSOR_SPLIT=$TENSOR_SPLIT → -ts $TS_ARG (completion+bench)"
+fi
+if [ -n "${N_THREADS:-}" ]; then
+  CLI_EXTRA+=(-t "$N_THREADS")
+  echo "N_THREADS=$N_THREADS → -t $N_THREADS (completion+bench)"
+fi
+if [ -n "${MAIN_GPU:-}" ]; then
+  CLI_EXTRA+=(-mg "$MAIN_GPU")
+  echo "MAIN_GPU=$MAIN_GPU → -mg $MAIN_GPU (completion+bench)"
+fi
+if [ -n "${LLAMA_NUMA:-}" ]; then
+  CLI_EXTRA+=(--numa "$LLAMA_NUMA")
+  echo "LLAMA_NUMA=$LLAMA_NUMA → --numa $LLAMA_NUMA (completion+bench)"
+fi
+if [ -n "${BENCH_EXTRA_ARGS:-}" ]; then
+  # shellcheck disable=SC2206
+  CLI_EXTRA+=($BENCH_EXTRA_ARGS)
+fi
+
+# Wrap binaries with numactl so MoE CPU pages land on chosen NUMA nodes
+NUMA_PREFIX=()
+if [ "${NUMACTL_ENABLE:-0}" = "1" ]; then
+  echo "=== numactl -H (host memory topology; expect NUMA 0/1=DDR, 2/3=HBM) ==="
+  numactl -H 2>&1 | head -80 || echo "WARNING: numactl -H failed"
+  NUMACTL_ARGS=${NUMACTL_ARGS:---physcpubind=1-51,105-155 --membind=0}
+  # shellcheck disable=SC2206
+  NUMA_PREFIX=(numactl $NUMACTL_ARGS)
+  echo "NUMACTL_ENABLE=1 NUMA_PREFIX=${NUMA_PREFIX[*]}"
+  echo "AFFINITY_NOTE: GPU0/FLAT0,1 → socket0 (HWT 1-51,105-155; DDR NUMA0; HBM NUMA2). Cores 0/52 reserved."
+fi
+
+echo "host=$(hostname)"
+echo "date=$(date -Is)"
+echo "CYCLE=$CYCLE SPLIT_MODE=$SPLIT_MODE N_CTX=$N_CTX NGL=$NGL EXE=$EXE"
+echo "TP=${TP:-} TENSOR_SPLIT=${TENSOR_SPLIT:-} ALLOW_MULTI_GPU=${ALLOW_MULTI_GPU:-0}"
+echo "MEASURE_TTFT=$MEASURE_TTFT RUN_BENCH=$RUN_BENCH BENCH_REPS=$BENCH_REPS N_PP=$N_PP N_PREDICT=$N_PREDICT"
+echo "FILL_CTX=${FILL_CTX:-0} PROMPT_FILE=${PROMPT_FILE:-}"
+echo "NUMACTL_ENABLE=${NUMACTL_ENABLE:-0} NUMACTL_ARGS=${NUMACTL_ARGS:-} LLAMA_NUMA=${LLAMA_NUMA:-}"
+echo "EXTRA_ARGS=$EXTRA_ARGS CLI_EXTRA=${CLI_EXTRA[*]}"
+test -x "$EXE"
+test -x "$BIN/llama-bench"
+test -f "$GGUF"
+ls -lh "$GGUF"
+
+# NOTE: Aurora compute nodes often lack `rg` — use grep -E only.
+# Capture full completion to RAW, then extract metric lines (avoids SIGPIPE if filter fails).
+filter_metrics_lines() {
+  tr -d '\r' | perl -pe '1 while s/.\x08//' | \
+    grep -aE "prompt eval|eval time|load time|sampling time|total time|METRICS_|error|could not|OUT_OF|ggml_|SYCL|offload|common_perf|llama_perf|PERF_|TILE_|tokens per|metal|organic|framework|MOF|CPU_Mapped|buffer size|split|FILL_|N_CTX|PHASE_G|NUMA|numactl|membind" || true
+}
+
+CLI_LOG=$LLAMA_ROOT/logs/perf_${CYCLE}_cli.log
+CLI_RAW=$LLAMA_ROOT/logs/perf_${CYCLE}_cli.raw
+BENCH_LOG=$LLAMA_ROOT/logs/perf_${CYCLE}_bench.log
+: > "$CLI_LOG"
+: > "$CLI_RAW"
+: > "$BENCH_LOG"
+
+PROMPT='What is a metal-organic framework (MOF)? Answer in one short paragraph of clear English.'
+PROMPT_ARGS=(-p "$PROMPT")
+
+# Phase G: fill context window with long prompt (leave room for N_PREDICT + margin)
+if [ "${FILL_CTX:-0}" = "1" ] || [ -n "${PROMPT_FILE:-}" ]; then
+  if [ -z "${PROMPT_FILE:-}" ]; then
+    _fill_tok=$((N_CTX - N_PREDICT - 256))
+    [ "$_fill_tok" -lt 512 ] && _fill_tok=512
+    # Cap extreme fills if FILL_CTX_TOKENS set (optional override)
+    if [ -n "${FILL_CTX_TOKENS:-}" ]; then
+      _fill_tok=$FILL_CTX_TOKENS
+    fi
+    PROMPT_FILE=$LLAMA_ROOT/logs/prompt_fill_${CYCLE}_${N_CTX}.txt
+    echo "FILL_CTX=1 target_tokens=$_fill_tok → $PROMPT_FILE"
+    bash "$LLAMA_ROOT/make_fill_prompt.sh" "$_fill_tok" "$PROMPT_FILE"
+  fi
+  test -f "$PROMPT_FILE"
+  echo "PROMPT_FILE=$PROMPT_FILE bytes=$(wc -c < "$PROMPT_FILE")"
+  PROMPT_ARGS=(-f "$PROMPT_FILE")
+fi
+
+SECONDS=0
+
+# --- TTFT + prefill TPS + gen TPS (canonical; non-interactive) ---
+if [ "$MEASURE_TTFT" = "1" ]; then
+  echo "=== completion timing (TTFT / prefill / gen) N_CTX=$N_CTX ==="
+  set -x
+  set +e
+  "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$EXE" \
+    -m "$GGUF" \
+    "${PROMPT_ARGS[@]}" \
+    -n "$N_PREDICT" \
+    -c "$N_CTX" \
+    -ngl "$NGL" \
+    -sm "$SPLIT_MODE" \
+    --seed 42 \
+    -no-cnv \
+    --single-turn \
+    --jinja \
+    --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+    --no-mmap \
+    --no-display-prompt \
+    "${CLI_EXTRA[@]}" \
+    >"$CLI_RAW" 2>&1
+  _comp_rc=$?
+  set -e
+  set +x
+  echo "COMPLETION_EXIT=$_comp_rc"
+  if [ "$_comp_rc" -ne 0 ]; then
+    echo "COMPLETION_FAIL=1 (continuing to bench if enabled)"
+    tail -20 "$CLI_RAW" || true
+  fi
+  # Cap raw size in the metrics log; keep timings
+  filter_metrics_lines < "$CLI_RAW" | tee "$CLI_LOG"
+  # Also append a short quality snippet (first matching MOF line if any)
+  grep -aEi "metal|organic|framework|MOF|porous|ligand" "$CLI_RAW" 2>/dev/null | head -5 >> "$CLI_LOG" || true
+  # Truncate huge raw to avoid filling project quota (keep last 200KB for debug)
+  if [ "$(stat -c%s "$CLI_RAW" 2>/dev/null || echo 0)" -gt 2000000 ]; then
+    tail -c 200000 "$CLI_RAW" > "${CLI_RAW}.tail" && mv "${CLI_RAW}.tail" "$CLI_RAW"
+    echo "CLI_RAW_TRUNCATED=1" | tee -a "$CLI_LOG"
+  fi
+  echo "TTFT_PHASE_SECONDS=$SECONDS"
+  # Ensure extract sees timings even if filter missed: scan raw too
+  if ! grep -aq "prompt eval time" "$CLI_LOG" 2>/dev/null; then
+    grep -aE "prompt eval time|eval time =" "$CLI_RAW" >> "$CLI_LOG" || true
+  fi
+fi
+
+# --- llama-bench if time remains ---
+# Note: this llama-bench build has no -c/--ctx-size; context follows -p/-n.
+# Also: llama-bench aborts with --numa (SIGABRT) — strip it from bench extras.
+BENCH_EXTRA=()
+for _a in "${CLI_EXTRA[@]}"; do
+  if [ "$_a" = "--numa" ] || [ "$_a" = "numactl" ] || [ "$_a" = "distribute" ] || [ "$_a" = "isolate" ]; then
+    continue
+  fi
+  BENCH_EXTRA+=("$_a")
+done
+# Drop orphaned value if we skipped --numa NUM
+_tmp=()
+_skip_next=0
+for _a in "${CLI_EXTRA[@]}"; do
+  if [ "$_skip_next" = 1 ]; then _skip_next=0; continue; fi
+  if [ "$_a" = "--numa" ]; then _skip_next=1; continue; fi
+  _tmp+=("$_a")
+done
+BENCH_EXTRA=("${_tmp[@]}")
+echo "BENCH_EXTRA=${BENCH_EXTRA[*]} (numa stripped for llama-bench)"
+
+if [ "$RUN_BENCH" = "1" ]; then
+  if [ "$SECONDS" -ge "$BENCH_DEADLINE_S" ]; then
+    echo "SKIP_BENCH reason=walltime_budget SECONDS=$SECONDS deadline=$BENCH_DEADLINE_S"
+  else
+    echo "=== llama-bench (pp${N_PP} / tg${N_PREDICT}; N_CTX=${N_CTX} for completion only) SECONDS=$SECONDS ==="
+    set +e
+    set -x
+    "${NUMA_PREFIX[@]}" stdbuf -oL -eL "$BIN/llama-bench" \
+      -m "$GGUF" \
+      -ngl "$NGL" \
+      -sm "$SPLIT_MODE" \
+      -p "$N_PP" -n "$N_PREDICT" \
+      -r "$BENCH_REPS" \
+      "${BENCH_EXTRA[@]}" \
+      2>&1 | tee "$BENCH_LOG"
+    _bench_rc=${PIPESTATUS[0]}
+    set +x
+    set -e
+    echo "BENCH_EXIT=$_bench_rc"
+    if [ "$_bench_rc" -ne 0 ]; then
+      echo "BENCH_FAIL=1 (metrics still recorded from completion)"
+    fi
+  fi
+fi
+
+echo "=== METRICS ==="
+bash "$LLAMA_ROOT/extract_metrics.sh" "$CLI_LOG" "$BENCH_LOG"
+
+echo "TILE_PIN_OK=1"
+echo "PERF_DONE=1 CYCLE=$CYCLE"
+echo "date=$(date -Is) SECONDS=$SECONDS"

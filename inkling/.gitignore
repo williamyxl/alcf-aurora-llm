@@ -1,0 +1,36 @@
+# Allowlist: track campaign scripts/docs only.
+# No models, llama.cpp trees, builds, logs, caches, or cores.
+
+*
+!*/
+models/
+core.*
+**/core.*
+
+# Nested source / builds / runtime
+build-llamacpp-sycl/llama.cpp/
+build-llamacpp-sycl/build/
+build-llamacpp-sycl/logs/
+build-llamacpp-sycl/rpc_cache/
+build-llamacpp-sycl-rpc/llama.cpp/
+build-llamacpp-sycl-rpc/build/
+build-llamacpp-sycl-rpc/logs/
+
+# Root docs / PBS / helpers
+!.gitignore
+!README.md
+!*.pbs
+!*.sh
+
+# Single-node campaign
+!build-llamacpp-sycl/
+build-llamacpp-sycl/*
+!build-llamacpp-sycl/*.md
+!build-llamacpp-sycl/*.sh
+!build-llamacpp-sycl/cycles/
+!build-llamacpp-sycl/cycles/**
+
+# RPC campaign notes (no nested llama.cpp / build)
+!build-llamacpp-sycl-rpc/
+build-llamacpp-sycl-rpc/*
+!build-llamacpp-sycl-rpc/README.md

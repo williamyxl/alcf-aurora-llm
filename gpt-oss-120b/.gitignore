@@ -1,0 +1,116 @@
+# Allowlist: track only setup / infer / train scripts + docs (~85 KB).
+# No models, checkpoints, wheels, conda env, build trees, or logs.
+
+# Ignore everything by default
+*
+
+# Allow descending into directories, then re-block heavy / nested-git trees
+!*/
+.cache/
+models/
+checkpoints/
+logs/
+diag_*/
+build-vllm-xpu/env/
+build-vllm-xpu/xiaoliyan/
+build-vllm-xpu/build-src/
+build-vllm-xpu/frameworks-standalone/
+build-vllm-xpu/logs/
+build-vllm-xpu/archive/
+build-vllm-xpu/uv-cache/
+build-vllm-xpu/wheels/
+build-vllm-xpu/llvm-*/
+
+# Root policy / docs / install helpers
+!.gitignore
+!README.md
+!FILES.md
+!install.sh
+!download_model.sh
+
+# Stack build PBS
+!build_vllm_xpu_phaseA.pbs
+!build_vllm_xpu_llvm_triton.pbs
+!build_vllm_xpu_torch.pbs
+!build_vllm_xpu_torch_install.pbs
+!build_vllm_xpu_ipex.pbs
+!build_vllm_xpu_ipex_install.pbs
+!build_vllm_xpu_ccl.pbs
+!build_vllm_xpu_kernels.pbs
+!build_vllm_xpu_vllm.pbs
+!build_vllm_xpu_repair_env.pbs
+
+# Inference
+!infer_chat.pbs
+!infer_serve.pbs
+!one_chat.py
+!triton_xpu_smoke.py
+!bench_perf.pbs
+!bench_perf.py
+!bench_perf_persist.pbs
+!bench_perf_moe_ref.pbs
+!bench_perf_moe_fused.pbs
+!bench_perf_moe_fused_tp2.pbs
+!bench_perf_moe_fused_tp4.pbs
+!bench_perf_moe_fp8.pbs
+!bench_perf_graphs.pbs
+!bench_perf_tp12.pbs
+!bench_perf_tp2.pbs
+!bench_perf_tp4.pbs
+!bench_perf_ctx131k.pbs
+!bench_perf_halfprec.pbs
+!download_gptoss_bf16_fp16.sh
+
+# llama.cpp SYCL (Aurora escape hatch) — PBS + helpers at repo root
+!build_llamacpp_sycl.pbs
+!build_llamacpp_sycl_mxfp4_reorder.pbs
+!convert_gptoss_mxfp4_gguf.pbs
+!download_gptoss_mxfp4_gguf.pbs
+!download_gptoss_mxfp4_gguf.sh
+!smoke_llamacpp_sycl.pbs
+!bench_llamacpp_sycl.pbs
+!bench_llamacpp_sycl_perf.pbs
+!bench_llamacpp_sycl_phaseG.pbs
+
+# Training
+!train_lora_smoke.pbs
+!lora_one_epoch.py
+
+# build-llamacpp-sycl: docs, cycle envs, harness scripts only
+# (no llama.cpp clone, build/, logs/)
+!build-llamacpp-sycl/
+build-llamacpp-sycl/*
+!build-llamacpp-sycl/*.md
+!build-llamacpp-sycl/*.sh
+!build-llamacpp-sycl/cycles/
+build-llamacpp-sycl/cycles/*
+!build-llamacpp-sycl/cycles/*.env
+build-llamacpp-sycl/llama.cpp/
+build-llamacpp-sycl/build/
+build-llamacpp-sycl/build-mxfp4-reorder/
+build-llamacpp-sycl/logs/
+
+# build-vllm-xpu: only pins, docs, patches
+!build-vllm-xpu/
+build-vllm-xpu/*
+!build-vllm-xpu/pins.env
+!build-vllm-xpu/VERSIONS.md
+!build-vllm-xpu/PHASE_STATUS.md
+!build-vllm-xpu/SUCCESS_INFER.md
+!build-vllm-xpu/SUCCESS_TRAIN.md
+!build-vllm-xpu/SUCCESS_PERF.md
+!build-vllm-xpu/BEST_PRACTICE.md
+!build-vllm-xpu/PERF_PLAN.md
+!build-vllm-xpu/PERF.md
+!build-vllm-xpu/RESUME.md
+!build-vllm-xpu/perf-team/
+build-vllm-xpu/perf-team/*
+!build-vllm-xpu/perf-team/*.md
+!build-vllm-xpu/patches/
+build-vllm-xpu/patches/*
+!build-vllm-xpu/patches/README.md
+!build-vllm-xpu/patches/triton_intel_driver_opencl_optional.txt
+!build-vllm-xpu/patches/triton_intel_driver.c.aurora-opencl-optional
+!build-vllm-xpu/patches/mem_info.cpp.aurora-ze-fallback
+!build-vllm-xpu/patches/mem_info.cpp.aurora-ze-fallback.txt
+!build-vllm-xpu/patches/block_table_slot_mapping_torch_fallback.txt

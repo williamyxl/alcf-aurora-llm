@@ -1,0 +1,259 @@
+#!/bin/bash -l
+# Multi-node Inkling pure-GPU via ggml-rpc-server (SYCL+RPC).
+# Queue: debug-scaling ONLY. Nodes = PBS_SELECT from cycle env (ceil(TP/12)).
+#
+# Layout (densest packing):
+#   Node 0: client llama-completion with LOCAL tiles 0..(n0-1)
+#           + --rpc to remote servers for remaining tiles
+#   Node i>0: ggml-rpc-server exposing that node's tile slice
+#
+# Submit:
+#   qsub -q debug-scaling -l select=2 -v CYCLE=PG16 \
+#     -o .../perf_PG16.out bench_llamacpp_sycl_rpc_multinode.pbs
+#
+#PBS -l select=2
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-rpc-mn
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/perf_rpc.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export LLAMA_RPC_ROOT=$WORKDIR/build-llamacpp-sycl-rpc
+export LLAMA_SINGLE=$WORKDIR/build-llamacpp-sycl
+export BIN=$LLAMA_RPC_ROOT/build/bin
+export GGUF=${GGUF:-$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf}
+export CYCLE=${CYCLE:-PG16}
+CYCLE_ENV=${CYCLE_ENV:-$LLAMA_SINGLE/cycles/${CYCLE}.env}
+export LOGS=$LLAMA_SINGLE/logs
+export RPC_PORT=${RPC_PORT:-50052}
+# Compute nodes often cannot mkdir under $HOME/.cache — use flare for RPC tensor cache.
+export LLAMA_CACHE=${LLAMA_CACHE:-$LLAMA_SINGLE/rpc_cache}
+mkdir -p "$LLAMA_CACHE"
+
+module load oneapi/release/2025.3.1
+
+if [ ! -x "$BIN/ggml-rpc-server" ] || [ ! -x "$BIN/llama-completion" ]; then
+  echo "ERROR: RPC build missing ($BIN). Submit build_llamacpp_sycl_rpc.pbs first."
+  echo "BUILD_RPC_OK missing"
+  exit 3
+fi
+
+if [ -f "$CYCLE_ENV" ]; then
+  echo "sourcing $CYCLE_ENV"
+  set -a
+  # shellcheck disable=SC1090
+  source "$CYCLE_ENV"
+  set +a
+fi
+
+TP=${TP:-14}
+NGL=${NGL:-99}
+N_CTX=${N_CTX:-4096}
+N_PREDICT=${N_PREDICT:-128}
+SPLIT_MODE=${SPLIT_MODE:-layer}
+EXTRA_ARGS=${EXTRA_ARGS:--fa on --reasoning off}
+GGML_SYCL_ENABLE_VMM=${GGML_SYCL_ENABLE_VMM:-0}
+export GGML_SYCL_ENABLE_VMM
+export ZE_FLAT_DEVICE_HIERARCHY=${ZE_FLAT_DEVICE_HIERARCHY:-FLAT}
+export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+export ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN:-1}
+
+mapfile -t NODES < <(sort -u "$PBS_NODEFILE")
+NN=${#NODES[@]}
+NEED=$(( (TP + 11) / 12 ))
+echo "host0=$(hostname) date=$(date -Is) CYCLE=$CYCLE TP=$TP nodes=${NN} need=$NEED"
+echo "NODES=${NODES[*]}"
+if [[ "$NN" -lt "$NEED" ]]; then
+  echo "ERROR: allocated $NN nodes but TP=$TP needs $NEED"
+  exit 4
+fi
+
+# Tile counts per node (densest): fill node0 first
+REMAIN=$TP
+TILES_PER_NODE=()
+for ((i=0; i<NN; i++)); do
+  if [[ "$REMAIN" -le 0 ]]; then
+    TILES_PER_NODE+=(0)
+  else
+    t=$(( REMAIN > 12 ? 12 : REMAIN ))
+    TILES_PER_NODE+=("$t")
+    REMAIN=$((REMAIN - t))
+  fi
+done
+echo "TILES_PER_NODE=${TILES_PER_NODE[*]}"
+
+affinity_list() {
+  local n=$1
+  seq -s, 0 $((n - 1))
+}
+
+# Equal tensor split across TP logical devices
+TS=$(python3 -c "n=int('$TP'); w=1.0/n; print('/'.join(f'{w:.10f}' for _ in range(n)))")
+
+RPC_PIDS=()
+cleanup() {
+  for p in "${RPC_PIDS[@]:-}"; do
+    kill "$p" 2>/dev/null || true
+  done
+  # also kill remote servers via mpiexec cleanup — best-effort
+  mpiexec -n "$NN" -ppn 1 pkill -f "ggml-rpc-server.*${RPC_PORT}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Hybrid layout (Aurora): local SYCL on NODES[0] + RPC only for remote nodes.
+# All-RPC failed: HSN self-connect and 127.0.0.1 to the dense node both miss,
+# so the 12-tile server got 0 accepts and only the 2-tile remote ran (invalid TP).
+CLIENT_NODE=${NODES[0]}
+LOCAL_TILES=${TILES_PER_NODE[0]}
+LOCAL_AFF=$(affinity_list "$LOCAL_TILES")
+echo "CLIENT_NODE=$CLIENT_NODE LOCAL_TILES=$LOCAL_TILES LOCAL_AFF=$LOCAL_AFF"
+
+echo "=== launching ggml-rpc-server on REMOTE nodes only (port $RPC_PORT) ==="
+RPC_ENDPOINTS=()
+for ((i=1; i<NN; i++)); do
+  nt=${TILES_PER_NODE[$i]}
+  [[ "$nt" -gt 0 ]] || continue
+  node=${NODES[$i]}
+  aff=$(affinity_list "$nt")
+  echo "remote node=$node tiles=$nt affinity=$aff"
+  node_cache="$LLAMA_CACHE/${CYCLE}_n${i}"
+  mkdir -p "$node_cache"
+  mpiexec -n 1 -ppn 1 --hosts "$node" \
+    env ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK="$aff" \
+        ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1 \
+        GGML_SYCL_ENABLE_VMM=0 \
+        LLAMA_CACHE="$node_cache" \
+    stdbuf -oL -eL "$BIN/ggml-rpc-server" -H 0.0.0.0 -p "$RPC_PORT" -c \
+    >"$LOGS/perf_${CYCLE}_rpc_${i}.log" 2>&1 &
+  RPC_PIDS[$i]=$!
+  RPC_ENDPOINTS+=("${node}:${RPC_PORT}")
+  echo "rpc endpoint: ${node}:${RPC_PORT}"
+done
+
+RPC_LIST=$(IFS=,; echo "${RPC_ENDPOINTS[*]}")
+echo "RPC_LIST=${RPC_LIST:-<none>}"
+echo "LLAMA_CACHE=$LLAMA_CACHE"
+# Banded flash-attn asserts under SYCL RPC graph_compute (FLASH_ATTN_EXT_BANDED).
+EXTRA_ARGS=$(echo " ${EXTRA_ARGS} " | sed -E 's/ --?fa on / -fa off /g; s/ --?fa auto / -fa off /g; s/ --?fa off / -fa off /g')
+case " $EXTRA_ARGS " in
+  *" -fa off "*) ;;
+  *) EXTRA_ARGS="$EXTRA_ARGS -fa off" ;;
+esac
+EXTRA_ARGS=$(echo "$EXTRA_ARGS" | xargs)
+echo "EXTRA_ARGS(RPC)=$EXTRA_ARGS"
+
+if [[ ${#RPC_ENDPOINTS[@]} -gt 0 ]]; then
+  echo "Waiting for remote RPC servers to come up..."
+  rpc_log_ready() {
+    local lf=$1
+    [ -f "$lf" ] || return 1
+    grep -qE 'Starting RPC server|transport[[:space:]]*:[[:space:]]*TCP' "$lf" 2>/dev/null
+  }
+  ready=0
+  for ((w=0; w<150; w++)); do
+    ready=1
+    for ((i=1; i<NN; i++)); do
+      nt=${TILES_PER_NODE[$i]}
+      [[ "$nt" -gt 0 ]] || continue
+      lf="$LOGS/perf_${CYCLE}_rpc_${i}.log"
+      pid=${RPC_PIDS[$i]:-}
+      if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+        echo "ERROR: RPC launcher pid $pid for server $i exited early"
+        tail -50 "$lf" 2>/dev/null || true
+        exit 5
+      fi
+      if ! rpc_log_ready "$lf"; then
+        ready=0
+      fi
+      if [ -f "$lf" ] && grep -qE 'Failed to create cache|No device of requested type|GGML_ASSERT|rank 0 (exited|died)' "$lf" 2>/dev/null; then
+        echo "ERROR: RPC server $i failed early:"
+        tail -40 "$lf"
+        exit 5
+      fi
+    done
+    [[ "$ready" -eq 1 ]] && break
+    sleep 2
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    echo "ERROR: RPC servers not ready after wait"
+    ls -la "$LOGS"/perf_${CYCLE}_rpc_*.log 2>/dev/null || true
+    for lf in "$LOGS"/perf_${CYCLE}_rpc_*.log; do
+      echo "=== $lf ==="
+      tail -40 "$lf" || true
+    done
+    exit 5
+  fi
+  echo "RPC servers ready."
+  ls -la "$LOGS"/perf_${CYCLE}_rpc_*.log 2>/dev/null || true
+else
+  echo "WARNING: no remote RPC endpoints (TP fits on one node?) — local SYCL only"
+fi
+
+PROMPT='What is a metal-organic framework (MOF)? Answer in one short paragraph of clear English.'
+PROMPT_ARGS=(-p "$PROMPT")
+
+# Match single-node bench: fill context when FILL_CTX=1 or PROMPT_FILE set
+echo "FILL_CTX=${FILL_CTX:-0} FILL_CTX_TOKENS=${FILL_CTX_TOKENS:-} PROMPT_FILE=${PROMPT_FILE:-}"
+if [ "${FILL_CTX:-0}" = "1" ] || [ -n "${PROMPT_FILE:-}" ]; then
+  if [ -z "${PROMPT_FILE:-}" ]; then
+    _fill_tok=$((N_CTX - N_PREDICT - 256))
+    [ "$_fill_tok" -lt 512 ] && _fill_tok=512
+    if [ -n "${FILL_CTX_TOKENS:-}" ]; then
+      _fill_tok=$FILL_CTX_TOKENS
+    fi
+    PROMPT_FILE=$LOGS/prompt_fill_${CYCLE}_${N_CTX}.txt
+    echo "FILL_CTX=1 target_tokens=$_fill_tok → $PROMPT_FILE"
+    bash "$LLAMA_SINGLE/make_fill_prompt.sh" "$_fill_tok" "$PROMPT_FILE"
+  fi
+  test -f "$PROMPT_FILE"
+  echo "PROMPT_FILE=$PROMPT_FILE bytes=$(wc -c < "$PROMPT_FILE")"
+  PROMPT_ARGS=(-f "$PROMPT_FILE")
+fi
+
+CLI_LOG=$LOGS/perf_${CYCLE}_cli.log
+CLI_RAW=$LOGS/perf_${CYCLE}_cli.raw
+
+# shellcheck disable=SC2206
+EXTRA_ARR=( $EXTRA_ARGS )
+
+RPC_CLI_ARGS=()
+if [[ -n "${RPC_LIST}" ]]; then
+  RPC_CLI_ARGS=(--rpc "$RPC_LIST")
+fi
+
+echo "=== llama-completion local SYCL + optional --rpc (TP=$TP LOCAL=$LOCAL_TILES) ==="
+set +e
+# Client on dense node with local tiles; remotes attached via --rpc (HSN).
+mpiexec -n 1 -ppn 1 --hosts "$CLIENT_NODE" \
+  env ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK="$LOCAL_AFF" \
+      GGML_SYCL_ENABLE_VMM=0 \
+      ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1 \
+  stdbuf -oL -eL "$BIN/llama-completion" \
+    -m "$GGUF" \
+    "${PROMPT_ARGS[@]}" \
+    -n "$N_PREDICT" -c "$N_CTX" -ngl "$NGL" -sm "$SPLIT_MODE" \
+    --seed 42 -no-cnv --single-turn --jinja \
+    --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+    --no-mmap --no-display-prompt \
+    "${RPC_CLI_ARGS[@]}" \
+    -ts "$TS" \
+    "${EXTRA_ARR[@]}" \
+  2>&1 | tee "$CLI_RAW" | tee "$CLI_LOG"
+_comp_rc=${PIPESTATUS[0]}
+set -e
+echo "COMPLETION_EXIT=${_comp_rc}"
+
+# Extract metrics if harness helper exists
+if [ -x "$LLAMA_SINGLE/extract_metrics.sh" ]; then
+  bash "$LLAMA_SINGLE/extract_metrics.sh" "$CLI_LOG" "" || true
+fi
+
+echo "PERF_DONE=1 CYCLE=$CYCLE BACKEND=RPC_HYBRID TP=$TP LOCAL_TILES=$LOCAL_TILES NODES=$NN RPC_LIST=${RPC_LIST:-none}"
+echo "date=$(date -Is)"
+exit "${_comp_rc}"

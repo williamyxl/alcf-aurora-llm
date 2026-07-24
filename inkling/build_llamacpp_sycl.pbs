@@ -1,0 +1,71 @@
+#!/bin/bash -l
+# Clone/update llama.cpp (Inkling-capable tip) and build Intel SYCL.
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-sycl-build
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/build.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export SRC=$LLAMA_ROOT/llama.cpp
+export BUILD=$LLAMA_ROOT/build
+export LOGS=$LLAMA_ROOT/logs
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+
+mkdir -p "$LOGS" "$BUILD"
+module load oneapi/release/2025.3.1
+
+if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/cmake ]; then
+  export PATH="/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin:$PATH"
+fi
+
+echo "host=$(hostname) date=$(date -Is)"
+echo "icpx=$(icpx --version 2>&1 | head -1)"
+echo "cmake=$(cmake --version | head -1)"
+
+if [ ! -d "$SRC/.git" ]; then
+  echo "Cloning llama.cpp..."
+  git clone https://github.com/ggml-org/llama.cpp.git "$SRC"
+fi
+
+cd "$SRC"
+# Inkling arch is NOT on main yet — need PR #25731 (Unsloth day-0 support)
+echo "Fetching PR #25731 (inkling architecture)..."
+git fetch origin pull/25731/head:pr-25731
+git checkout -f pr-25731
+echo "git=$(git rev-parse HEAD) $(git log -1 --oneline)"
+# Sanity: must contain inkling arch
+if ! grep -RIl -i 'inkling' src include ggml 2>/dev/null | head -1 | grep -q .; then
+  echo "ERROR: checked out tree still has no 'inkling' strings"
+  exit 3
+fi
+grep -RIl -i 'inkling' src include ggml 2>/dev/null | head -15
+
+rm -rf "$BUILD"
+cmake -S "$SRC" -B "$BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_SYCL=ON \
+  -DGGML_SYCL_F16=ON \
+  -DGGML_SYCL_DEVICE_ARCH=pvc \
+  -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DLLAMA_BUILD_TESTS=OFF \
+  -DLLAMA_BUILD_EXAMPLES=ON \
+  -DLLAMA_BUILD_SERVER=ON
+
+cmake --build "$BUILD" -j "$(nproc)"
+
+echo "=== binaries ==="
+ls -lh "$BUILD/bin/llama-cli" "$BUILD/bin/llama-completion" "$BUILD/bin/llama-bench" 2>/dev/null | head -20
+"$BUILD/bin/llama-cli" --help 2>&1 | head -5 || true
+echo "date=$(date -Is)"
+echo "BUILD_OK=1"

@@ -1,0 +1,67 @@
+#!/bin/bash -l
+# Separate Inkling SYCL build WITH GGML_RPC (multi-node backend).
+# Does NOT overwrite build-llamacpp-sycl/ (single-node).
+# Queue: debug-scaling (user: multinode backend testing lives here).
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-sycl-rpc-build
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl-rpc/logs/build.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl-rpc
+export SRC=$LLAMA_ROOT/llama.cpp
+export BUILD=$LLAMA_ROOT/build
+export LOGS=$LLAMA_ROOT/logs
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export ftp_proxy=http://proxy.alcf.anl.gov:3128
+
+mkdir -p "$LOGS" "$BUILD"
+module load oneapi/release/2025.3.1
+
+if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/cmake ]; then
+  export PATH="/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin:$PATH"
+fi
+
+echo "host=$(hostname) date=$(date -Is)"
+echo "BUILD_TREE=$LLAMA_ROOT (separate from single-node build-llamacpp-sycl)"
+echo "icpx=$(icpx --version 2>&1 | head -1)"
+echo "cmake=$(cmake --version | head -1)"
+echo "src_git=$(cd "$SRC" && git rev-parse HEAD) $(cd "$SRC" && git log -1 --oneline)"
+
+# Sanity: inkling arch present
+if ! grep -RIl -i 'inkling' "$SRC/src" "$SRC/include" "$SRC/ggml" 2>/dev/null | head -1 | grep -q .; then
+  echo "ERROR: source tree has no inkling arch"
+  exit 3
+fi
+
+rm -rf "$BUILD"
+cmake -S "$SRC" -B "$BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_SYCL=ON \
+  -DGGML_SYCL_F16=ON \
+  -DGGML_SYCL_DEVICE_ARCH=pvc \
+  -DGGML_RPC=ON \
+  -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DLLAMA_BUILD_TESTS=OFF \
+  -DLLAMA_BUILD_EXAMPLES=ON \
+  -DLLAMA_BUILD_SERVER=ON \
+  -DLLAMA_TOOLS_INSTALL=ON
+
+cmake --build "$BUILD" -j "$(nproc)"
+
+echo "=== binaries ==="
+ls -lh "$BUILD/bin/llama-completion" "$BUILD/bin/ggml-rpc-server" "$BUILD/bin/llama-bench" 2>/dev/null
+"$BUILD/bin/ggml-rpc-server" --help 2>&1 | head -20 || true
+"$BUILD/bin/llama-completion" --help 2>&1 | grep -i rpc | head -5 || true
+echo "date=$(date -Is)"
+echo "BUILD_RPC_OK=1"
