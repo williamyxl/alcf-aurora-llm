@@ -86,7 +86,8 @@ RPC forces `-fa off` → V cache padded to 2048 at 131k (large KV). `FILL_CTX` w
 | **C_PG16** | 131072 | 16 | hybrid 12+4 FA-off | 0–11 + remote | NA | NA | NA | FAIL_OOM | remote OUT_OF_RESOURCES RMS_NORM (same as C_PG14) |
 | **C_PG18** | 131072 | 18 | hybrid 12+6 FA-off | 0–11 + remote | NA | NA | NA | FAIL_OOM | remote OUT_OF_RESOURCES RMS_NORM |
 | **C_PG20** | 131072 | 20 | hybrid 12+8 FA-off | 0–11 + remote | NA | NA | NA | FAIL_OOM | remote OUT_OF_RESOURCES OP SCALE |
-| **C_PG22** | 131072 | 22 | hybrid 12+10 FA-off | 0–11 + remote | **3096** | **6.46** | **5.65** | PASS* | *alloc OK* but prompt was **20 tok** (default MOF) — RPC PBS lacked `FILL_CTX`; not true 8k fill. Re-run after FILL fix |
-| **C_PG24** | 131072 | 24 | hybrid 12+12 FA-off + FILL | 0–11 + remote | — | — | — | QUEUED | job **8693776**; first run with FILL_CTX fix in RPC PBS |
+| **C_PG22** (short20) | 131072 | 22 | hybrid 12+10 FA-off | 0–11 + remote | **3096** | **6.46** | **5.65** | PASS* | *alloc OK* but prompt was **20 tok** (no FILL) — archived `perf_C_PG22.out.short20tok_nofill` |
+| **C_PG22** | 131072 | 22 | hybrid 12+10 FA-off + FILL | 0–11 + remote | NA | NA | NA | FAIL_OOM | job **8693927**; FILL_CTX 8192 (~8220 tok est) wrote OK; load OK (V-pad 2048) then `UR_RESULT_ERROR_OUT_OF_RESOURCES` at generate start (ggml-sycl.cpp:3665); COMPLETION_EXIT=1; N_PROMPT=NA |
+| **C_PG24** | 131072 | 24 | hybrid 12+12 FA-off + FILL | 0–11 + remote | NA | NA | NA | FAIL_OOM | job **8693776**; FILL_CTX 8192 (~8220 tok est) wrote OK; load OK then `UR_RESULT_ERROR_OUT_OF_RESOURCES` at generate start (ggml-sycl.cpp:3665); COMPLETION_EXIT=1; N_PROMPT=NA |
 
-**Phase M multi-node status:** C_PG14–20 FAIL_OOM under FA-off V-pad. C_PG22 fits 131k alloc (short prompt). C_PG24 + true 8k fill in flight; C_PG22 may need fill re-run.
+**Phase M multi-node status:** C_PG14–20 FAIL_OOM under FA-off V-pad. **C_PG22** and **C_PG24** with true 8k FILL → FAIL_OOM at generate (`OUT_OF_RESOURCES`). Short-prompt C_PG22 PASS* (20 tok) does not count as max-ctx fill. **Multi-node max-ctx with fill not viable at TP 22/24** (nor 14–20).
