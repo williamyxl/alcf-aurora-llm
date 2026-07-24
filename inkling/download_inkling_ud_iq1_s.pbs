@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-gguf-dl
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/download_ud_iq1_s.out
+#PBS -j oe
+
+set -euo pipefail
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+bash /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/download_inkling_ud_iq1_s.sh

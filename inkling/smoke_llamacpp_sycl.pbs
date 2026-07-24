@@ -1,0 +1,104 @@
+#!/bin/bash -l
+# Smoke: llama.cpp SYCL + MXFP4 GGUF on 2 tiles of the SAME GPU.
+# Pass = meaningful (non-garbage) text. See build-llamacpp-sycl/PLAN.md Phase C.
+#
+# Submit: qsub smoke_llamacpp_sycl.pbs
+# Env overrides: CYCLE, NGL, N_CTX, N_PREDICT, SPLIT_MODE, ZE_AFFINITY_MASK,
+#                ZE_FLAT_DEVICE_HIERARCHY, EXTRA_ARGS
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-smoke
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/smoke.out
+#PBS -j oe
+
+set -euo pipefail
+
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
+export BIN=$LLAMA_ROOT/build/bin
+export GGUF=${GGUF:-$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf}
+export CYCLE=${CYCLE:-S1}
+CYCLE_ENV=${CYCLE_ENV:-$LLAMA_ROOT/cycles/${CYCLE}.env}
+
+# oneapi module sets ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE — apply cycle pin AFTER module
+module load oneapi/release/2025.3.1
+
+if [ -f "$CYCLE_ENV" ]; then
+  echo "sourcing $CYCLE_ENV (after oneapi module)"
+  set -a
+  # shellcheck disable=SC1090
+  source "$CYCLE_ENV"
+  set +a
+fi
+
+NGL=${NGL:-99}
+N_CTX=${N_CTX:-2048}
+N_PREDICT=${N_PREDICT:-128}
+SPLIT_MODE=${SPLIT_MODE:-layer}
+EXE=${EXE:-$BIN/llama-completion}
+EXTRA_ARGS=${EXTRA_ARGS:---no-mmap -v -fa on}
+
+# Refuse partial CPU offload unless explicitly allowed
+if [ "${NGL}" -lt 99 ] && [ "${ALLOW_CPU_OFFLOAD:-0}" != "1" ]; then
+  echo "REFUSING NGL=$NGL (<99). Set ALLOW_CPU_OFFLOAD=1 only after pure-GPU backlog exhausted."
+  echo "See $LLAMA_ROOT/PURE_GPU_BACKLOG.md"
+  exit 4
+fi
+
+# shellcheck source=/dev/null
+source "$LLAMA_ROOT/same_gpu_2tiles.env.sh"
+
+echo "host=$(hostname)"
+echo "date=$(date -Is)"
+echo "CYCLE=$CYCLE EXE=$EXE SPLIT_MODE=$SPLIT_MODE N_CTX=$N_CTX NGL=$NGL"
+echo "EXTRA_ARGS=$EXTRA_ARGS"
+test -x "$EXE"
+test -f "$GGUF"
+ls -lh "$GGUF"
+
+PROMPT='What is a metal-organic framework (MOF)? Answer in one short paragraph of clear English.'
+
+OUT_TXT=$LLAMA_ROOT/logs/smoke_${CYCLE}_out.txt
+LOG=$LLAMA_ROOT/logs/smoke_${CYCLE}.log
+
+# shellcheck disable=SC2086
+set -x
+"$EXE" \
+  -m "$GGUF" \
+  -p "$PROMPT" \
+  -n "$N_PREDICT" \
+  -c "$N_CTX" \
+  -ngl "$NGL" \
+  -sm "$SPLIT_MODE" \
+  --seed 42 \
+  -no-cnv \
+  --jinja \
+  --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+  $EXTRA_ARGS \
+  2>&1 | tee "$LOG" | tee "$OUT_TXT"
+set +x
+
+if grep -qiE 'could not create a memory object|OUT_OF_DEVICE_MEMORY|can.t allocate|Aborted' "$LOG"; then
+  echo "SMOKE_QUALITY=FAIL_OOM"
+  exit 3
+fi
+if grep -E '!{8,}' "$OUT_TXT" >/dev/null 2>&1 && \
+   ! grep -Ei 'metal|organic|framework|MOF|porous|ligand' "$OUT_TXT" >/dev/null; then
+  echo "SMOKE_QUALITY=FAIL"
+  exit 2
+fi
+if grep -Ei 'metal|organic|framework|MOF|porous|crystal|ligand|coordination' "$OUT_TXT" >/dev/null; then
+  echo "SMOKE_QUALITY=PASS"
+else
+  echo "SMOKE_QUALITY=CHECK_MANUAL"
+fi
+# Always emit TTFT / prefill TPS / gen TPS
+echo "=== METRICS ==="
+bash "$LLAMA_ROOT/extract_metrics.sh" "$LOG" ""
+echo "TILE_PIN_OK=1"
+echo "date=$(date -Is)"
