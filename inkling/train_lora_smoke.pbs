@@ -1,0 +1,61 @@
+#!/bin/bash -l
+# Phase 2 smoke: 1 node, device_map=auto + disk offload.
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-lora1
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/train_lora.out
+#PBS -j oe
+
+set -euo pipefail
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export BUILD=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$WORKDIR/build-llamacpp-sycl/logs
+mkdir -p "$LOGS" "$WORKDIR/checkpoints/lora-smoke/offload"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export PYTHONUNBUFFERED=1
+unset SYCL_CACHE_PERSISTENT
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_${PBS_JOBID:-$$}
+mkdir -p "$SYCL_CACHE_DIR"
+
+export INKLING_LOAD_MODE=offload
+export INKLING_XPU_MAX=40GiB
+export INKLING_CPU_MAX=120GiB
+export WORLD_SIZE=1
+export ACCELERATE_NUM_PROCESSES=1
+export ACCELERATE_NUM_MACHINES=1
+# Avoid CCL auto-init looking like multi-rank
+unset CCL_WORKER_COUNT
+unset CCL_ATL_TRANSPORT
+
+echo "host=$(hostname) date=$(date -Is)"
+module list 2>&1 | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+echo "python=$(command -v python)"
+# Lightweight check — avoid a second heavy mpiexec import that can hang/buffer
+python -u -c "import torch; print('xpu_count', torch.xpu.device_count(), flush=True)"
+
+echo "=== launching lora_one_epoch (no mpiexec — device_map=auto) ==="
+# mpiexec sets PMI/PALS vars → Accelerate thinks distributed → rejects device_map=auto
+env -u PMI_RANK -u PMI_SIZE -u PALS_RANKID -u PALS_LOCAL_RANKID -u MPI_LOCALRANKID \
+    -u OMPI_COMM_WORLD_RANK -u OMPI_COMM_WORLD_SIZE -u OMPI_COMM_WORLD_LOCAL_RANK \
+    WORLD_SIZE=1 RANK=0 LOCAL_RANK=0 \
+    python -u lora_one_epoch.py
+echo "date=$(date -Is)"

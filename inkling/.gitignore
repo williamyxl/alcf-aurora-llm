@@ -4,6 +4,7 @@
 *
 !*/
 models/
+checkpoints/
 core.*
 **/core.*
 
@@ -16,11 +17,22 @@ build-llamacpp-sycl-rpc/llama.cpp/
 build-llamacpp-sycl-rpc/build/
 build-llamacpp-sycl-rpc/logs/
 
-# Root docs / PBS / helpers
+# Root docs / PBS / helpers / FT
 !.gitignore
 !README.md
+!FINETUNE_PLAN.md
+!LOOP_STATUS.md
+!SUCCESS_TRAIN.md
 !*.pbs
 !*.sh
+!*.py
+
+# Smoke gate only (no adapter/tokenizer blobs)
+!checkpoints/
+checkpoints/*
+!checkpoints/lora-smoke/
+checkpoints/lora-smoke/*
+!checkpoints/lora-smoke/SUCCESS_TRAIN.md
 
 # Single-node campaign
 !build-llamacpp-sycl/

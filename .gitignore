@@ -125,8 +125,13 @@ inkling/build-llamacpp-sycl-rpc/logs/
 
 !inkling/.gitignore
 !inkling/README.md
+!inkling/FINETUNE_PLAN.md
+!inkling/LOOP_STATUS.md
+!inkling/SUCCESS_TRAIN.md
 !inkling/*.pbs
 !inkling/*.sh
+!inkling/*.py
+!inkling/checkpoints/lora-smoke/SUCCESS_TRAIN.md
 
 !inkling/build-llamacpp-sycl/
 inkling/build-llamacpp-sycl/*

@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-p1-meta
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/phase1_probe.out
+#PBS -j oe
+# Phase1A: empty-weights module scan + optional local XPU load (expect OOM).
+# True multi-node shard is Phase2 FSDP (select=4+); single mpiexec rank cannot span nodes.
+
+set -euo pipefail
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export BUILD=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu
+export ENV=$BUILD/env
+mkdir -p "$WORKDIR/build-llamacpp-sycl/logs"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+unset SYCL_CACHE_PERSISTENT
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_${PBS_JOBID:-$$}
+mkdir -p "$SYCL_CACHE_DIR"
+
+echo "host=$(hostname) date=$(date -Is)"
+module list 2>&1 | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+mpiexec -n 1 --ppn 1 python -c "import torch; print('xpu_count', torch.xpu.device_count())"
+mpiexec -n 1 --ppn 1 python probe_inkling_modules.py
+echo "date=$(date -Is)"

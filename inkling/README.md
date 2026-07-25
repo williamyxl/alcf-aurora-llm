@@ -9,9 +9,10 @@
 3. gpt-oss knobs: `VMM=0`, pure GPU `-sm tensor -fa on` even `-ts`, MoE `-ncmoe 99` + sock0 HBM `--preferred=2`
 
 ## Paths
-- Models: `models/inkling-UD-IQ1_S.gguf` → first shard
+- Models: `models/unsloth-Inkling-GGUF/UD-IQ1_S/…-00001-of-00007.gguf`
 - Build: `build-llamacpp-sycl/build/bin/`
 - Ledger: `build-llamacpp-sycl/CYCLE_LOG.md`
+- Finetune plan: [`FINETUNE_PLAN.md`](FINETUNE_PLAN.md) (draft; GGUF is infer-only — needs HF weights)
 
 ## Submit helpers
 ```bash

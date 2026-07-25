@@ -1,0 +1,74 @@
+#!/bin/bash -l
+# Phase 2 LoRA smoke via FSDP (meta + param-broadcast load). No device_map=auto.
+# 4 nodes × 12 tiles = 48 ranks. Full 66-layer unshard ~36GiB/layer OOMs 64GiB
+# XPUs; smoke sets INKLING_SMOKE_LAYERS (default 4) so peak fits.
+#PBS -l select=4
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N inkling-lora-fsdp
+#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/train_lora_fsdp.out
+#PBS -j oe
+
+set -euo pipefail
+export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export BUILD=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$WORKDIR/build-llamacpp-sycl/logs
+mkdir -p "$LOGS" "$WORKDIR/checkpoints/lora-smoke"
+cd "$WORKDIR"
+
+source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+set -a
+source "$BUILD/pins.env"
+set +a
+conda activate "$ENV"
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export PYTHONUNBUFFERED=1
+unset SYCL_CACHE_PERSISTENT
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_${PBS_JOBID:-$$}
+mkdir -p "$SYCL_CACHE_DIR"
+
+export INKLING_LOAD_MODE=fsdp
+# Few layers so peak HBM is manageable; CPU offload keeps shards on host.
+export INKLING_SMOKE_LAYERS=2
+export INKLING_FSDP_CPU_OFFLOAD=1
+export INKLING_PPN=12
+NNODES=$(wc -l < "$PBS_NODEFILE")
+PPN=12
+NRANKS=$((NNODES * PPN))
+export PBS_NUM_NODES=$NNODES
+
+# oneCCL / torch.distributed
+export CCL_ATL_TRANSPORT="${CCL_ATL_TRANSPORT:-ofi}"
+export CCL_WORKER_COUNT="${CCL_WORKER_COUNT:-1}"
+export MASTER_ADDR=$(head -n 1 "$PBS_NODEFILE")
+export MASTER_PORT="${MASTER_PORT:-29501}"
+export WORLD_SIZE=$NRANKS
+
+echo "host=$(hostname) date=$(date -Is) nnodes=$NNODES nranks=$NRANKS master=$MASTER_ADDR"
+module list 2>&1 | grep -i frameworks && { echo "frameworks loaded — FAIL"; exit 1; } || echo "no frameworks OK"
+echo "python=$(command -v python)"
+
+mpiexec -n "$NRANKS" --ppn "$PPN" --cpu-bind depth -d 16 \
+  python -u -c "import os,torch,oneccl_bindings_for_pytorch as _; print('probe', {k:os.environ.get(k) for k in ('PALS_RANKID','PALS_LOCAL_RANKID','PMI_RANK','PMI_SIZE','WORLD_SIZE')}, 'xpu', torch.xpu.device_count(), flush=True)"
+
+echo "=== launching lora_one_epoch FSDP (mpiexec $NRANKS) ==="
+mpiexec -n "$NRANKS" --ppn "$PPN" --cpu-bind depth -d 16 \
+  -genv WORLD_SIZE="$NRANKS" \
+  -genv MASTER_ADDR="$MASTER_ADDR" \
+  -genv MASTER_PORT="$MASTER_PORT" \
+  -genv INKLING_LOAD_MODE=fsdp \
+  -genv INKLING_PPN="$PPN" \
+  -genv PBS_NUM_NODES="$NNODES" \
+  python -u lora_one_epoch.py
+echo "date=$(date -Is)"
