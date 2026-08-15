@@ -1,0 +1,31 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:12:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N xpu-archprobe
+#PBS -j oe
+
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/arch_probe.log
+exec > "$LOG" 2>&1
+echo "START $(date -Is) host=$(hostname)"
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+python - <<'PY'
+import torch, vllm_xpu_kernels  # noqa
+print("torch", torch.__version__, "dev", torch.xpu.get_device_properties(0).name)
+try:
+    import vllm_xpu_kernels._xpu_C  # noqa
+except Exception as e:
+    print("import _xpu_C:", e)
+for fn in ("is_xe2_arch", "is_xe3_arch"):
+    try:
+        r = getattr(torch.ops._xpu_C, fn)()
+        print(f"{fn}() = {r}")
+    except Exception as e:
+        print(f"{fn}() RAISED: {type(e).__name__}: {e}")
+PY
+echo "DONE $(date -Is)"

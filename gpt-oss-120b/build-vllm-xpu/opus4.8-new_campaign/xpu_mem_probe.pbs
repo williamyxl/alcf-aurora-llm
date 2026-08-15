@@ -1,0 +1,38 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:15:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N xpu-memprobe
+#PBS -j oe
+
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/xpu_mem_probe.log
+exec > "$LOG" 2>&1
+echo "START $(date -Is) host=$(hostname)"
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZES_ENABLE_SYSMAN=1
+
+echo "=== who is on the GPUs (xpu-smi) ==="
+xpu-smi dump -d 0 -m 0,5 2>/dev/null | head || echo "no xpu-smi"
+python - <<'PY'
+import torch
+print("torch", torch.__version__, "xpu_avail", torch.xpu.is_available(), "n", torch.xpu.device_count())
+for i in range(torch.xpu.device_count()):
+    free, total = torch.xpu.mem_get_info(i) if hasattr(torch.xpu, "mem_get_info") else (-1,-1)
+    props = torch.xpu.get_device_properties(i)
+    print(f"dev{i} name={props.name} total_GB={getattr(props,'total_memory',0)/1e9:.1f} "
+          f"free_GB={free/1e9 if free>=0 else 'n/a'} tot_GB={total/1e9 if total>=0 else 'n/a'}")
+    # try a small alloc
+    try:
+        x = torch.zeros(int(1e8), dtype=torch.float16, device=f"xpu:{i}")  # ~200MB
+        print(f"  alloc OK on dev{i}")
+        del x
+    except Exception as e:
+        print(f"  alloc FAIL dev{i}: {e}")
+PY
+echo "DONE $(date -Is)"

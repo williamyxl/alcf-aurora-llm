@@ -1,0 +1,100 @@
+#!/bin/bash -l
+# E1/E3/E5/E6 vLLM-XPU bench driver for the new campaign.
+# Runs bench_perf.py with per-experiment overrides via -v.
+#
+# REQUIRES: build-vllm-xpu/env (self-built torch-XPU + IPEX + vllm-xpu-kernels + vLLM).
+#   Not present in this checkout — build via build_vllm_xpu_*.pbs (needs frameworks-standalone
+#   recipe repo) before this can run. See opus4.8-new_campaign/RESULTS.md "Blocked" section.
+#
+# Submit examples:
+#   # E3 batch sweep (repeat MNS in {1,4,8,16}):
+#   qsub -q debug-scaling -v TP=2,MNS=16,EAGER=true,PROF=0 -N e3-mns16 \
+#     -o build-vllm-xpu/logs/e3_mns16.out exp_vllm_bench.pbs
+#   # E5 TP=1:
+#   qsub -q debug-scaling -v TP=1,MNS=1,KVGIB=4,MML=2048,EAGER=true -N e5-tp1 \
+#     -o build-vllm-xpu/logs/e5_tp1.out exp_vllm_bench.pbs
+#   # E6 verified graph capture:
+#   qsub -q debug-scaling -v TP=2,MNS=2,EAGER=false -N e6-graphs \
+#     -o build-vllm-xpu/logs/e6_graphs.out exp_vllm_bench.pbs
+#   # E7 NUMA/HBM binding (adds numactl prefix):
+#   qsub -q debug-scaling -v TP=2,MNS=2,NUMA=1 -N e7-numa \
+#     -o build-vllm-xpu/logs/e7_numa.out exp_vllm_bench.pbs
+#   # E1 profile (torch XPU profiler wrapper via PROF=1):
+#   qsub -q debug-scaling -v TP=2,MNS=2,PROF=1 -N e1-prof \
+#     -o build-vllm-xpu/logs/e1_prof.out exp_vllm_bench.pbs
+#
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:59
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-exp
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/logs/vllm_exp.out
+#PBS -j oe
+
+set -uo pipefail
+
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
+export BUILD=$WORKDIR/build-vllm-xpu
+export ENV=$BUILD/env
+export LOGS=$BUILD/logs
+mkdir -p "$LOGS"
+cd "$WORKDIR"
+
+# Overridable knobs (-v)
+TP=${TP:-2}
+MNS=${MNS:-2}
+KVGIB=${KVGIB:-8}
+MML=${MML:-4096}
+MAXTOK=${MAXTOK:-128}
+EAGER=${EAGER:-true}
+MOE=${MOE:-ref}
+NUMA=${NUMA:-0}
+PROF=${PROF:-0}
+
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+if [ ! -d "$ENV" ]; then
+  echo "FATAL: $ENV missing — build the vLLM-XPU stack first (build_vllm_xpu_*.pbs)."
+  echo "This checkout has docs/patches/pins only; no env, no wheels, no frameworks-standalone recipes."
+  exit 3
+fi
+set -a; source "$BUILD/pins.env"; set +a
+conda activate "$ENV"
+module load oneapi/release/2025.3.1
+
+export HF_HOME=$WORKDIR/.cache/huggingface
+export TMPDIR=/tmp RAY_TMPDIR=/tmp
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"
+[ "$MOE" = "ref" ] && export VLLM_XPU_FUSED_MOE_USE_REF=1
+export TORCHDYNAMO_DISABLE=1 TORCH_COMPILE_DISABLE=1
+export CCL_PROCESS_LAUNCHER=hydra CCL_ZE_IPC_EXCHANGE=sockets CCL_WORKER_COUNT=1
+unset SYCL_CACHE_PERSISTENT
+JOBTAG=${PBS_JOBID:-$$}
+export SYCL_CACHE_DIR=$TMPDIR/sycl_cache_${JOBTAG} TRITON_CACHE_DIR=$TMPDIR/triton_cache_${JOBTAG}
+mkdir -p "$SYCL_CACHE_DIR" "$TRITON_CACHE_DIR"
+
+echo "host=$(hostname) date=$(date -Is)"
+echo "EXP TP=$TP MNS=$MNS KVGIB=$KVGIB MML=$MML EAGER=$EAGER MOE=$MOE NUMA=$NUMA PROF=$PROF"
+
+PREFIX=()
+if [ "$NUMA" = "1" ]; then
+  # E7: ALCF socket0 HWTs + HBM NUMA node 2 (see build-llamacpp-sycl/BEST_RECIPE.md)
+  PREFIX=(numactl --physcpubind=1-51,105-155 --membind=2)
+  echo "NUMA bind: ${PREFIX[*]}"
+fi
+
+BENCH_ARGS=(--tp "$TP" --max-tokens "$MAXTOK" --moe-mode "$MOE" \
+  --max-model-len "$MML" --enforce-eager "$EAGER" \
+  --gpu-memory-utilization 0.82 --max-num-seqs "$MNS" --kv-cache-memory-gib "$KVGIB")
+
+if [ "$PROF" = "1" ]; then
+  # E1: wrap with torch XPU profiler; export a chrome trace for op/timeline bucketing.
+  export VLLM_EXP_PROFILE=1
+  echo "PROF=1: expecting bench_perf.py / vLLM profiler hooks; see trace in $LOGS."
+fi
+
+mpiexec -n 1 --ppn 1 "${PREFIX[@]}" python bench_perf.py "${BENCH_ARGS[@]}"
+echo "EXP_DONE date=$(date -Is)"

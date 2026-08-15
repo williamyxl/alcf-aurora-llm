@@ -21,6 +21,8 @@ conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora
 export HF_HOME=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/.cache/huggingface
 export TMPDIR=/tmp
 export HF_XET_HIGH_PERFORMANCE=1
+export http_proxy=${http_proxy:-http://proxy.alcf.anl.gov:3128}
+export https_proxy=${https_proxy:-http://proxy.alcf.anl.gov:3128}
 
 MODE="${1:-both}"
 

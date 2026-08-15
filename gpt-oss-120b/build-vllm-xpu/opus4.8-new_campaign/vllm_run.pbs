@@ -1,0 +1,79 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vllm-run
+#PBS -j oe
+
+# vLLM 0.27.1 XPU run. Overrides via -v:
+#   MODEL, TP, MML (max_model_len), MNS (max_num_seqs), MEMUTIL, KVGIB, EAGER, TAG, MAXTOK
+# Log: pass -o explicitly.
+set -o pipefail
+export SETVARS_CALL=${SETVARS_CALL:-0}
+export I_MPI_ROOT=${I_MPI_ROOT:-}
+
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+ENV=/lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu
+
+MODEL=${MODEL:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b}
+TP=${TP:-2}
+MML=${MML:-4096}
+MNS=${MNS:-2}
+MEMUTIL=${MEMUTIL:-0.90}
+KVGIB=${KVGIB:-}
+EAGER=${EAGER:-1}
+MAXTOK=${MAXTOK:-128}
+TAG=${TAG:-run}
+
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate "$ENV"
+# Do NOT load the oneapi module: it injects oneAPI 2025.3 libs that clash with torch's
+# bundled oneAPI 2026 (libsycl undefined symbol urDeviceWaitExp). torch-XPU is self-contained.
+# We only borrow Aurora's mpiexec (PALS) for PMI.
+MPIEXEC=$(command -v mpiexec)
+
+# XPU runtime env (torch 2.13+xpu bundles its own oneAPI rt; no module load frameworks)
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZES_ENABLE_SYSMAN=1
+# Disable HF checkpoint page-cache prefetch (8 ranks prefetching 218GB OOMs the node)
+export VLLM_XPU_FORCE_TRITON_MOE=1
+export HF_HUB_DISABLE_XET=0
+# gpt-oss on XPU: FLASH_ATTN garbles/segfaults; force Triton attention (project docs).
+export VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}
+export TORCHINDUCTOR_COMPILE_THREADS=1
+export HF_HUB_OFFLINE=1
+export TMPDIR=/tmp
+# oneCCL: use MPI transport via Aurora PALS (mpiexec provides PMI to each rank).
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_ATL_TRANSPORT=mpi
+export CCL_ZE_IPC_EXCHANGE=sockets
+export CCL_WORKER_COUNT=1
+export FI_PROVIDER=${FI_PROVIDER:-cxi}
+export CCL_LOG_LEVEL=info
+export MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
+export MASTER_PORT=${MASTER_PORT:-29500}
+# Ensure torch picks up rank/world from PALS PMI for external_launcher
+echo "PMI env: PALS_RANKID=${PALS_RANKID:-unset} PMI_RANK=${PMI_RANK:-unset} PMI_SIZE=${PMI_SIZE:-unset}"
+
+echo "host=$(hostname) date=$(date -Is)"
+echo "TAG=$TAG MODEL=$MODEL TP=$TP MML=$MML MNS=$MNS MEMUTIL=$MEMUTIL KVGIB=${KVGIB:-none} EAGER=$EAGER"
+python -c "import torch;print('torch',torch.__version__,'xpu',torch.xpu.is_available(),'n',torch.xpu.device_count())"
+
+EAGER_FLAG="--enforce-eager"; [ "$EAGER" = "0" ] && EAGER_FLAG="--no-enforce-eager"
+KV_FLAG=""; [ -n "${KVGIB:-}" ] && KV_FLAG="--kv-cache-memory-gib $KVGIB"
+OFFLOAD_FLAG=""; [ -n "${OFFLOADGB:-}" ] && OFFLOAD_FLAG="--cpu-offload-gb $OFFLOADGB"
+
+# Launch TP ranks under Aurora PALS mpiexec → each rank is a real MPI proc with PMI,
+# so oneCCL ATL=mpi initializes. Use vLLM external_launcher backend.
+mpiexec -n "$TP" --ppn "$TP" \
+  python "$CAMP/vllm_bench2.py" \
+  --model "$MODEL" --tp "$TP" --max-model-len "$MML" \
+  --max-num-seqs "$MNS" --gpu-mem-util "$MEMUTIL" \
+  --max-tokens "$MAXTOK" $EAGER_FLAG $KV_FLAG $OFFLOAD_FLAG \
+  --attention-backend "${ATTN:-TRITON_ATTN}" \
+  --distributed-executor-backend external_launcher --tag "$TAG"
+echo "VLLM_RUN_DONE date=$(date -Is)"
