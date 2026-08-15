@@ -7,12 +7,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-sycl-build
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/build.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/build.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
 export SRC=$LLAMA_ROOT/llama.cpp
 export BUILD=$LLAMA_ROOT/build
@@ -24,9 +24,8 @@ export ftp_proxy=http://proxy.alcf.anl.gov:3128
 mkdir -p "$LOGS" "$BUILD"
 module load oneapi/release/2025.3.1
 
-if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/cmake ]; then
-  export PATH="/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin:$PATH"
-fi
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm
 
 echo "host=$(hostname) date=$(date -Is)"
 echo "icpx=$(icpx --version 2>&1 | head -1)"
@@ -39,9 +38,17 @@ fi
 
 cd "$SRC"
 # Inkling arch is NOT on main yet — need PR #25731 (Unsloth day-0 support)
-echo "Fetching PR #25731 (inkling architecture)..."
-git fetch origin pull/25731/head:pr-25731
-git checkout -f pr-25731
+CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ "$CUR_BRANCH" = "pr-25731" ]; then
+  echo "Already on pr-25731 (skip fetch)"
+elif git rev-parse --verify pr-25731 >/dev/null 2>&1; then
+  echo "pr-25731 exists locally; checking out"
+  git checkout -f pr-25731
+else
+  echo "Fetching PR #25731 (inkling architecture)..."
+  git fetch origin pull/25731/head:pr-25731
+  git checkout -f pr-25731
+fi
 echo "git=$(git rev-parse HEAD) $(git log -1 --oneline)"
 # Sanity: must contain inkling arch
 if ! grep -RIl -i 'inkling' src include ggml 2>/dev/null | head -1 | grep -q .; then

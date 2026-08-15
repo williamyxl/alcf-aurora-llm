@@ -4,7 +4,7 @@ Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC /
 
 | | |
 |--|--|
-| Workdir | `/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b` |
+| Workdir | `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b` |
 | Env | `build-vllm-xpu/env` (Python 3.12) |
 | Model | `models/openai-gpt-oss-120b` (MXFP4 MoE) |
 | Status | Phases 0–6 **CLOSED**; perf **IN PROGRESS** — best practice: [`build-vllm-xpu/BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) |
@@ -26,7 +26,7 @@ Living log: `build-vllm-xpu/PHASE_STATUS.md`
 ## Quick start — inference
 
 ```bash
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 qsub infer_chat.pbs
 # log: build-vllm-xpu/logs/test_gptoss.out
 ```

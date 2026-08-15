@@ -4,7 +4,7 @@
 #        bash harvest_once.sh --submit   # submit next missing PRIORITY cycle if slots free
 
 set -uo pipefail
-ROOT=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 LLAMA=$ROOT/build-llamacpp-sycl
 PBS=$ROOT/bench_llamacpp_sycl_perf.pbs
 PBS_G=$ROOT/bench_llamacpp_sycl_phaseG.pbs

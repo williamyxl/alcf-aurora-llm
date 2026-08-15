@@ -11,10 +11,10 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N gpt-oss-bench-persist
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_persist.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/logs/bench_perf_persist.out
 #PBS -j oe
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 export BUILD=$WORKDIR/build-vllm-xpu
 export ENV=$BUILD/env
 export LOGS=$BUILD/logs
@@ -22,7 +22,7 @@ export LOGS=$BUILD/logs
 mkdir -p "$LOGS"
 cd "$WORKDIR"
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 set -a
 source "$BUILD/pins.env"
 set +a

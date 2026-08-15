@@ -8,7 +8,7 @@
 #   If preferred busy, fall back to the other queue when select fits (debug max 2 nodes).
 
 set -uo pipefail
-ROOT=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 LLAMA=$ROOT/build-llamacpp-sycl
 PBS=$ROOT/bench_llamacpp_sycl_perf.pbs
 PBS_RPC=$ROOT/bench_llamacpp_sycl_rpc_multinode.pbs

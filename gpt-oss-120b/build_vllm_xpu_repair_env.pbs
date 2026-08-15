@@ -10,10 +10,10 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N vllm-xpu-fix
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase4_repair_env.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/logs/phase4_repair_env.out
 #PBS -j oe
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 export BUILD=$WORKDIR/build-vllm-xpu
 export ENV=$BUILD/env
 export WHEELS=$BUILD/$(whoami)
@@ -23,7 +23,7 @@ export ftp_proxy=http://proxy.alcf.anl.gov:3128
 export TMPDIR=/tmp
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 set -a
 source "$BUILD/pins.env"
 set +a

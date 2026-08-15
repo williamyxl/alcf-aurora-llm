@@ -21,7 +21,7 @@ Canonical docs: `../README.md`, `VERSIONS.md`, `SUCCESS_INFER.md`, `SUCCESS_TRAI
 ## Chronological log
 
 phase=0 status=PASS date=2026-07-16T20:19:40+00:00
-notes: ci-lib.sh patched (oneAPI after reset; KEEP_BUILD_DIR persistent build-src); conda env /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env py3.12 with uv/jq; pins.env non-empty branch refs (SHA lock after Phase 4).
+notes: ci-lib.sh patched (oneAPI after reset; KEEP_BUILD_DIR persistent build-src); conda env /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/env py3.12 with uv/jq; pins.env non-empty branch refs (SHA lock after Phase 4).
 
 phase=1 status=IN_PROGRESS date=2026-07-16T21:38:03+00:00 notes: resubmit after exporting pins.env (unbound FRAMEWORKS_* in job 8676828)
 

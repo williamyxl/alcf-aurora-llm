@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export OUT_DIR=$WORKDIR/models/unsloth-Inkling-GGUF
 export http_proxy=${http_proxy:-http://proxy.alcf.anl.gov:3128}
 export https_proxy=${https_proxy:-http://proxy.alcf.anl.gov:3128}
@@ -20,10 +20,10 @@ GGUF_INCLUDE=${GGUF_INCLUDE:-'UD-IQ1_S/*'}
 
 mkdir -p "$OUT_DIR"
 
-if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/hf ]; then
+if [ -f /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm/bin/hf ]; then
   # shellcheck source=/dev/null
-  source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
-  conda activate /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env
+  source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+  conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm
 fi
 
 echo "host=$(hostname) date=$(date -Is)"

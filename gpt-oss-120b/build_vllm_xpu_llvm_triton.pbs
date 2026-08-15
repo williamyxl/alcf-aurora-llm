@@ -11,11 +11,11 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N vllm-xpu-p1
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/logs/phase1_llvm_triton.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/logs/phase1_llvm_triton.out
 #PBS -j oe
 # Note: llvm caches under $BUILD/llvm-$HASH; triton may need several resubmits.
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 export BUILD=$WORKDIR/build-vllm-xpu
 export ENV=$BUILD/env
 export WHEELS=$BUILD/$(whoami)
@@ -33,7 +33,7 @@ export KEEP_BUILD_DIR=1
 
 mkdir -p "$WHEELS" "$LOGS"
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 set -a
 source "$BUILD/pins.env"
 set +a

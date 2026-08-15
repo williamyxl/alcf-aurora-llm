@@ -12,7 +12,7 @@
   "world_size": 48,
   "mode": "fsdp",
   "n_loaded": 4,
-  "adapter_path": "/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/checkpoints/lora-smoke/adapter",
+  "adapter_path": "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/checkpoints/lora-smoke/adapter",
   "target_modules": [
     "q_proj",
     "v_proj"

@@ -5,7 +5,7 @@
 ## Submit
 
 ```bash
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 qsub bench_perf_ctx131k.pbs
 ```
 

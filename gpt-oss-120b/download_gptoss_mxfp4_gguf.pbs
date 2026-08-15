@@ -9,10 +9,10 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N gptoss-gguf-hf
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/download_gguf_hf.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-llamacpp-sycl/logs/download_gguf_hf.out
 #PBS -j oe
 
 set -euo pipefail
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
-bash /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/download_gptoss_mxfp4_gguf.sh
+bash /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/download_gptoss_mxfp4_gguf.sh

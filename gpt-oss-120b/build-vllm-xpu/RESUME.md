@@ -12,7 +12,7 @@ Stack bring-up (Phases **0–6**) is **CLOSED**. Only **performance** work is op
 
 | | |
 |--|--|
-| Workdir | `/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b` |
+| Workdir | `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b` |
 | Conda env | `build-vllm-xpu/env` (Python 3.12) — **no** `module load frameworks` |
 | Model | `models/openai-gpt-oss-120b` (MXFP4 MoE, ~60.8 GiB on disk) |
 | Account / PBS | `-A MatSciAI`; typical queues `debug` / `debug-scaling` (max walltime **01:00:00**) |
@@ -134,7 +134,7 @@ Phase 5’s “343 s TTFT” was **e2e wall**, not first-token.
 ### How to validate P7
 
 ```bash
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 qstat -u xiaoliyan          # should be empty before submit if possible
 qsub bench_perf.pbs         # queue: debug, ~1h wall
 # log:
@@ -202,7 +202,7 @@ Logs (not in git): `build-vllm-xpu/logs/bench_perf*.out`
 ## 6. Exact resume command sequence
 
 ```bash
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 
 # 0) hygiene
 git status -sb

@@ -9,18 +9,18 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-lora-fsdp
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/train_lora_fsdp.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/train_lora_fsdp.out
 #PBS -j oe
 
 set -euo pipefail
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
-export BUILD=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
+export BUILD=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu
 export ENV=$BUILD/env
 export LOGS=$WORKDIR/build-llamacpp-sycl/logs
 mkdir -p "$LOGS" "$WORKDIR/checkpoints/lora-smoke"
 cd "$WORKDIR"
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 set -a
 source "$BUILD/pins.env"
 set +a

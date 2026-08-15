@@ -11,7 +11,7 @@ import vllm_xpu_kernels._moe_C  # noqa: F401
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-MODEL = "/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/models/openai-gpt-oss-120b"
+MODEL = "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b"
 
 MESSAGES = [
     {

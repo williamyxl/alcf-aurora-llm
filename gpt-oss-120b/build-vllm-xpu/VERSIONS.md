@@ -1,7 +1,7 @@
 # Co-built stack versions — CLOSED (Phases 0–6 PASS)
 
 **Updated:** 2026-07-18T02:30:00+00:00  
-**Env:** `/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env`  
+**Env:** `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/env`  
 **Gates:** `SUCCESS_INFER.md` + `SUCCESS_TRAIN.md`
 
 ## Runtime packages (installed in `$ENV`)

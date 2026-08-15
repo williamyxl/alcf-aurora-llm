@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:30:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ink-mo1min
+#PBS -j oe
+
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/mo1_min.log
+exec > "$LOG" 2>&1
+echo "START $(date -Is) host=$(hostname)"
+
+set -x
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
+BIN=$WORKDIR/build-llamacpp-sycl/build/bin
+GGUF=$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export GGML_SYCL_ENABLE_VMM=0
+
+echo "GGUF=$GGUF"; ls -lh "$GGUF"
+ls -lh "$BIN/llama-completion"
+free -g
+
+# MO1 recipe: 1 tile, MoE->CPU, HBM preferred (NOT membind), 32 threads, fa on
+numactl --physcpubind=1-51,105-155 --preferred=2 \
+  "$BIN/llama-completion" \
+  -m "$GGUF" \
+  -p "What is a metal-organic framework (MOF)? Answer in one short paragraph." \
+  -n 128 -c 4096 -ngl 99 -sm none \
+  --seed 42 -no-cnv --single-turn --jinja \
+  --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+  --no-mmap --no-display-prompt \
+  -fa on -ncmoe 99 -t 32 --numa numactl
+echo "COMPLETION_EXIT=$?"
+echo "DONE $(date -Is)"

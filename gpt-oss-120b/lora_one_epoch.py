@@ -17,7 +17,7 @@ def main():
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import SFTConfig, SFTTrainer
 
-    workdir = Path("/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b")
+    workdir = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b")
     model_path = workdir / "models" / "openai-gpt-oss-120b"
     out_dir = workdir / "checkpoints" / "lora-smoke"
     out_dir.mkdir(parents=True, exist_ok=True)

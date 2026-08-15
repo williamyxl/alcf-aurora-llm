@@ -43,7 +43,7 @@ Inverse scaling under BS=1 REF MoE: more tiles → more sync/comm overhead, not 
 ### How to run
 
 ```bash
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 
 # Recommended single-stream bench (TP=2, REF, KV pin)
 qsub bench_perf_tp2.pbs

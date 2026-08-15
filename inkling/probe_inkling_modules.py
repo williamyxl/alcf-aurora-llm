@@ -12,8 +12,8 @@ import time
 import traceback
 from pathlib import Path
 
-MODEL = Path("/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/models/inkling-hf")
-OUT = Path("/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/phase1_probe.json")
+MODEL = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/models/inkling-hf")
+OUT = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/phase1_probe.json")
 
 
 def _scan_modules(model) -> dict:

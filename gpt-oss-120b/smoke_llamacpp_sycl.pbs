@@ -13,12 +13,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N llamacpp-smoke
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/smoke.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-llamacpp-sycl/logs/smoke.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
 export BIN=$LLAMA_ROOT/build/bin
 export GGUF=${GGUF:-$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf}

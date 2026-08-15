@@ -12,13 +12,13 @@
 #   FP16: twhitworth/gpt-oss-120b-fp16
 
 set -euo pipefail
-cd /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 mkdir -p models .cache/huggingface
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
-conda activate /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm
 
-export HF_HOME=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/.cache/huggingface
+export HF_HOME=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/.cache/huggingface
 export TMPDIR=/tmp
 export HF_XET_HIGH_PERFORMANCE=1
 

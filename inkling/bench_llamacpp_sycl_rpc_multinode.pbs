@@ -18,12 +18,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-rpc-mn
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/perf_rpc.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/perf_rpc.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export LLAMA_RPC_ROOT=$WORKDIR/build-llamacpp-sycl-rpc
 export LLAMA_SINGLE=$WORKDIR/build-llamacpp-sycl
 export BIN=$LLAMA_RPC_ROOT/build/bin

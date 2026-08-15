@@ -1,7 +1,7 @@
 #!/bin/bash
 # Drip-feed remaining cycles as PBS Q slots free. Safe to re-run.
 set -uo pipefail
-ROOT=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 LLAMA=$ROOT/build-llamacpp-sycl
 LOG=$LLAMA/logs/agent_watch.log
 mkdir -p "$LLAMA/logs"

@@ -8,7 +8,7 @@
 #   bash agent_cycle.sh next                 # submit next pending from QUEUE
 
 set -euo pipefail
-ROOT=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 LLAMA=$ROOT/build-llamacpp-sycl
 PBS=$ROOT/bench_llamacpp_sycl_perf.pbs
 LOGS=$LLAMA/logs

@@ -6,19 +6,19 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-p1-meta
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/phase1_probe.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/phase1_probe.out
 #PBS -j oe
 # Phase1A: empty-weights module scan + optional local XPU load (expect OOM).
 # True multi-node shard is Phase2 FSDP (select=4+); single mpiexec rank cannot span nodes.
 
 set -euo pipefail
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
-export BUILD=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
+export BUILD=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu
 export ENV=$BUILD/env
 mkdir -p "$WORKDIR/build-llamacpp-sycl/logs"
 cd "$WORKDIR"
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 set -a
 source "$BUILD/pins.env"
 set +a

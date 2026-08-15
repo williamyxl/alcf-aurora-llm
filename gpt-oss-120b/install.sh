@@ -10,7 +10,7 @@ BUILD="$ROOT/build-vllm-xpu"
 ENV="$BUILD/env"
 WHEELS="$BUILD/xiaoliyan"
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 conda activate "$ENV"
 
 echo "Installing local wheels from $WHEELS (force-reinstall --no-deps)"

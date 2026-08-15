@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export REPO=${REPO:-thinkingmachines/Inkling}
 export OUT_DIR=${OUT_DIR:-$WORKDIR/models/inkling-hf}
 export HF_HOME=${HF_HOME:-$WORKDIR/.cache/huggingface}
@@ -25,10 +25,10 @@ MIN_OK_BYTES=${MIN_OK_BYTES:-1800000000000}  # ~1.8TB for BF16
 
 mkdir -p "$OUT_DIR" "$HF_HOME"
 
-if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/hf ]; then
+if [ -f /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm/bin/hf ]; then
   # shellcheck source=/dev/null
-  source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
-  conda activate /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env
+  source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+  conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/aurora-llm
 fi
 
 echo "host=$(hostname) date=$(date -Is)"

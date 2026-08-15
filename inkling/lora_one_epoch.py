@@ -19,7 +19,7 @@ from pathlib import Path
 import torch
 
 
-WORKDIR = Path("/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling")
+WORKDIR = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling")
 MODEL = WORKDIR / "models" / "inkling-hf"
 OUT_DIR = WORKDIR / "checkpoints" / "lora-smoke"
 

@@ -11,12 +11,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N gptoss-mxfp4-gguf
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-llamacpp-sycl/logs/convert.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-llamacpp-sycl/logs/convert.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
 export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
 export SRC=$LLAMA_ROOT/llama.cpp
 export ENV=$WORKDIR/build-vllm-xpu/env
@@ -25,7 +25,7 @@ export OUT_GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
-source /lus/flare/projects/MOFA/xiaoliyan/software/miniforge3/etc/profile.d/conda.sh
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
 conda activate "$ENV"
 
 echo "host=$(hostname)"

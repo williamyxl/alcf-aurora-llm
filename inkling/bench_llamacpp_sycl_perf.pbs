@@ -15,12 +15,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-perf
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/perf.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/perf.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl
 export BIN=$LLAMA_ROOT/build/bin
 export GGUF=${GGUF:-$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf}

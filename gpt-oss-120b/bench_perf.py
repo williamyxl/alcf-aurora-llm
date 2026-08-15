@@ -16,7 +16,7 @@ from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 DEFAULT_MODEL = (
-    "/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/models/openai-gpt-oss-120b"
+    "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b"
 )
 
 MESSAGES = [

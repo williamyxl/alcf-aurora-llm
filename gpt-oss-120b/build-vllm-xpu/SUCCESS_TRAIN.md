@@ -29,7 +29,7 @@ One full LoRA/SFT epoch (`epochs=1`) completed on XPU for local `models/openai-g
 ## TRAIN_JSON
 
 ```json
-{"ok":true,"device":"xpu","epochs":1,"n_samples":8,"n_steps":8,"train_loss":6.931554317474365,"train_s":20.3895333110122,"load_s":160.69036316301208,"xpu_count":12,"adapter_path":"/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/checkpoints/lora-smoke/adapter","target_modules":["q_proj","v_proj"],"lora_r":8}
+{"ok":true,"device":"xpu","epochs":1,"n_samples":8,"n_steps":8,"train_loss":6.931554317474365,"train_s":20.3895333110122,"load_s":160.69036316301208,"xpu_count":12,"adapter_path":"/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/checkpoints/lora-smoke/adapter","target_modules":["q_proj","v_proj"],"lora_r":8}
 ```
 
 ## Artifacts

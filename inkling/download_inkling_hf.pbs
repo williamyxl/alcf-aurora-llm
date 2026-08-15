@@ -6,7 +6,7 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-hf-dl
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs/download_hf.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs/download_hf.out
 #PBS -j oe
 
 # Resumable HF download of thinkingmachines/Inkling (~2TB BF16).
@@ -14,5 +14,5 @@
 set -euo pipefail
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
-mkdir -p /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl/logs
-bash /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/download_inkling_hf.sh
+mkdir -p /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/logs
+bash /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/download_inkling_hf.sh

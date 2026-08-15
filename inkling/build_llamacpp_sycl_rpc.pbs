@@ -10,12 +10,12 @@
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -N inkling-sycl-rpc-build
-#PBS -o /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling/build-llamacpp-sycl-rpc/logs/build.out
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl-rpc/logs/build.out
 #PBS -j oe
 
 set -euo pipefail
 
-export WORKDIR=/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/inkling
+export WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
 export LLAMA_ROOT=$WORKDIR/build-llamacpp-sycl-rpc
 export SRC=$LLAMA_ROOT/llama.cpp
 export BUILD=$LLAMA_ROOT/build
@@ -27,8 +27,8 @@ export ftp_proxy=http://proxy.alcf.anl.gov:3128
 mkdir -p "$LOGS" "$BUILD"
 module load oneapi/release/2025.3.1
 
-if [ -f /lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin/cmake ]; then
-  export PATH="/lus/flare/projects/MOFA/xiaoliyan/workdir/llm/gpt-oss-120b/build-vllm-xpu/env/bin:$PATH"
+if [ -f /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/env/bin/cmake ]; then
+  export PATH="/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/env/bin:$PATH"
 fi
 
 echo "host=$(hostname) date=$(date -Is)"
