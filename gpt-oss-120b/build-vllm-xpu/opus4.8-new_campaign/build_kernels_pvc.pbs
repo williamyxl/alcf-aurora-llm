@@ -1,0 +1,91 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N kbuild-pvc
+#PBS -j oe
+
+# Build vllm_xpu_kernels FROM SOURCE, AOT-targeted for PVC (Max 1550 / Xe-HPC).
+# The PyPI wheel segfaults on PVC (no working pvc AOT binary). Source CMake defaults
+# include pvc in AOT_DEVICES. Build with oneAPI icpx (build-time only); runtime uses
+# torch 2.13+xpu bundled oneAPI (do NOT load oneapi at runtime).
+
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/build_kernels_pvc.log
+exec > "$LOG" 2>&1
+set -o pipefail
+echo "START $(date -Is) host=$(hostname)"
+
+SRC=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/build-src/vllm-xpu-kernels
+WHEELS=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/xiaoliyan
+mkdir -p "$WHEELS"
+
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+export TMPDIR=/tmp
+ENV_LIB=/lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu/lib
+# Use oneAPI 2026.1 icpx to MATCH torch 2.13+xpu's bundled oneAPI 2026 runtime (single ABI).
+# Do NOT use Aurora's 2025.3 module (that caused the urDeviceWaitExp ABI clash).
+ONEAPI2026=/lus/flare/projects/MatSciAI/xiaoliyan/software/intel/oneapi
+# Purge any auto-loaded Aurora oneAPI so its 2025.3 icpx does not win on PATH.
+module unload oneapi 2>/dev/null || true
+module unload oneapi/release/2025.3.1 2>/dev/null || true
+source "$ONEAPI2026/setvars.sh" --force 2>&1 | tail -3
+# Force 2026 compiler bin to the FRONT of PATH and use absolute compilers.
+export PATH="$ONEAPI2026/compiler/latest/bin:$PATH"
+export CC="$ONEAPI2026/compiler/latest/bin/icx"
+export CXX="$ONEAPI2026/compiler/latest/bin/icpx"
+export CMAKE_C_COMPILER="$CC"
+export CMAKE_CXX_COMPILER="$CXX"
+# The kernels' cmake/toolchain.cmake uses $CMPLR_ROOT/bin/icpx — export it explicitly
+# (setvars sets it but pip's build subprocess loses it).
+export CMPLR_ROOT="$ONEAPI2026/compiler/latest"
+# 2026 icpx needs a modern libstdc++ (<version> header). System g++ is 7.5; use Aurora GCC 13.4.
+export GCC_TOOLCHAIN=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+export CFLAGS="--gcc-toolchain=$GCC_TOOLCHAIN ${CFLAGS:-}"
+export CXXFLAGS="--gcc-toolchain=$GCC_TOOLCHAIN ${CXXFLAGS:-}"
+export PATH="$GCC_TOOLCHAIN/bin:$PATH"
+export LD_LIBRARY_PATH="$GCC_TOOLCHAIN/lib64:$LD_LIBRARY_PATH"
+# cmake 4.x + Ninja: avoid RPATH relink error on install of xe_2 kernel libs.
+export CMAKE_ARGS="-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
+# Keep torch's bundled oneAPI (env/lib) FIRST for `import torch` in setup.py.
+export LD_LIBRARY_PATH="$ENV_LIB:$LD_LIBRARY_PATH"
+
+# AOT target PVC only (fast + correct for Max 1550)
+export VLLM_XPU_AOT_DEVICES="pvc"
+export VLLM_XPU_XE2_AOT_DEVICES="pvc"
+# Limit parallelism: heavy SYCL AOT compiles can host-OOM at -j208.
+export CMAKE_BUILD_PARALLEL_LEVEL=32
+export MAX_JOBS=32
+export VERBOSE=1
+
+echo "icpx_path=$(which icpx)"
+echo "icpx=$($CXX --version 2>&1 | head -1)"
+echo "python=$(python -V) torch=$(python -c 'import torch;print(torch.__version__)')"
+echo "src rev=$(git -C "$SRC" rev-parse --short HEAD)"
+
+cd "$SRC"
+# Full build log (do not truncate — capture ninja compile errors)
+python -m pip install --no-build-isolation -e . -v > "$LOG.pipfull" 2>&1
+RC=$?
+echo "PIP_RC=$RC"
+echo "=== last 80 lines of full build log ==="
+tail -80 "$LOG.pipfull"
+echo "=== compile errors (grep) ==="
+grep -aiE "error:|fatal error|ninja: build stopped|Killed|undefined reference|No such file" "$LOG.pipfull" | tail -30
+
+echo "=== verify import + a real op on XPU (2026 ABI matches torch runtime) ==="
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+python - <<'PY'
+import torch, vllm_xpu_kernels
+import vllm_xpu_kernels._C, vllm_xpu_kernels._moe_C
+print("kernels import OK, dev", torch.xpu.get_device_properties(0).name)
+x = torch.randn(8,256, device="xpu", dtype=torch.bfloat16)
+out = torch.empty(8,128, device="xpu", dtype=torch.bfloat16)
+torch.ops._C.silu_and_mul(out, x); torch.xpu.synchronize()
+print("silu_and_mul OK", float(out.float().sum()))
+PY
+echo "BUILD_KERNELS_DONE rc=$? $(date -Is)"

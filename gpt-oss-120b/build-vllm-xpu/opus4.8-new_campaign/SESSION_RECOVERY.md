@@ -243,3 +243,56 @@ Two independent blockers remain. Both must be cleared for a working vLLM run.
   3. Then push tok/s >30: TP sweep (2/4/8), fused vs REF MoE, max_num_seqs batching, enable XPU graph
      (`VLLM_XPU_ENABLE_XPU_GRAPH=1`).
 - Exact need: `icpx` **2026.0.0** (matches `intel-sycl-rt==2026.0.0` in torch 2.13 pins).
+
+## UPDATE 4 (2026-08-16 03:00) — ABI fixed; attention is the remaining wall
+
+**Big win:** oneAPI 2026.1 (user-installed at `.../software/intel/oneapi`) + GCC 13.4 toolchain →
+**source-built vllm_xpu_kernels for PVC succeeds** (single ABI). kernels import + basic SYCL ops
+(rms_norm, silu_and_mul) + matmul all work on Max 1550. oneCCL, mem profiler, engine init, model load
+all working. Build recipe in `build_kernels_pvc.pbs` (icpx2026 + CMPLR_ROOT + --gcc-toolchain=gcc13.4 +
+RPATH + mem_info patch + AOT pvc). See DEBUG_LOG.md P1–P10.
+
+**Remaining wall = ATTENTION (DEBUG_LOG P11–P14):** forward SIGSEGVs for EVERY model incl dense opt-125m.
+Isolated to attention (not MoE, not custom _C ops):
+- **TRITON_ATTN**: triton 3.7.2+xpu `driver.c init_devices` SIGSEGV at
+  `sycl::get_native<level_zero>(device)` (instrumented, confirmed). torch 2.13 pins triton-xpu==3.7.2
+  exactly, so can't downgrade to the project's known-good triton 3.6 without rebuilding torch+vllm.
+- **FLASH_ATTN**: vllm_xpu_kernels SYCL FA2 is xe2-only (`attn_interface.cpp:33`), no xe_default
+  fallback (unlike grouped-GEMM's `VLLM_XPU_FORCE_XE_DEFAULT_KERNEL=1`) → crashes on Xe-HPC.
+
+**Remaining options (next):**
+1. **Add an xe_default attention path**: patch `csrc/xpu/attn/attn_interface.cpp` so PVC does NOT take
+   the xe2 branch — route to `xe_default` if such a kernel exists in `csrc/xpu/attn/` (grouped_gemm has
+   xe_default; check attn). If it exists, rebuild kernels + use FLASH_ATTN. **Most promising.**
+   - Check: `ls build-src/vllm-xpu-kernels/csrc/xpu/attn/` (has xe_2/; look for xe_default/).
+2. **Fix triton get_native**: force driver.c to link torch's exact libsycl (INJECT_PYTORCH=True +
+   clear cache + prepend env/lib). Tried, still crashed — likely needs matching the runtime libsycl
+   load order; low confidence.
+3. **Build torch 2.8 + triton 3.6 + vllm from source** (VLLM_TARGET_DEVICE=xpu) = project's original
+   stack. Heavy (hours), but the only combo with a proven-working triton on Aurora.
+
+**Instrumentation left in place:** `driver.c` has KILO_DBG fprintf markers (backup at driver.c.orig).
+Remove or restore before production.
+
+**Bench target still open:** once attention works → gpt-oss MXFP4 TP=2 4096, then push >30 tok/s.
+
+## UPDATE 5 (2026-08-16 06:08) — SOLVED + full result matrix
+
+**vLLM WORKS on PVC** via Aurora `frameworks/2025.3.1` (vllm 0.15 + torch 2.10 + triton 3.6 + ipex
+2.10, IPEX Marlin MXFP4 MoE). Launch: `vllm_run_fw3.pbs` under full `module load frameworks` env.
+Decode target >30 tok/s MET. See `VLLM_RESULTS.md`, `VLLM_WORKING_RECIPE.md`, `README.md`, DEBUG_LOG P17–P21.
+
+Final decode tok/s (gpt-oss-120b MXFP4, quality-OK):
+- vLLM TP=4: 31.9 (4096) / 31.4 (131072); TP=2: 29.6 / 28.9; TP=8: 29.3 (4096).
+- llama.cpp F4_hbm 1-tile MoE→CPU: 41.6 (4096) / 38.1 (131072).
+
+Resolved questions:
+- Old campaign "frameworks can't run gpt-oss" = older module (vllm 0.10). Current module (vllm 0.15) works.
+- oneAPI 2026 fixed the self-built stack's ABI but that stack still crashes in attention; the working
+  path is the frameworks stack on oneAPI 2025.3.
+
+Not supported on vLLM XPU: single-tile weight/MoE CPU-offload (`cpu_offload_gb` = CUDA-only UVA op;
+runtime patch to bypass UVA also failed at engine init, job 8759421). Use llama.cpp F4_hbm for 1-tile.
+
+Campaign COMPLETE. New tracked files: README.md, VLLM_RESULTS.md, VLLM_WORKING_RECIPE.md, DEBUG_LOG.md,
+vllm_run_fw3.pbs, vllm_bench2.py, llama_f4hbm_ctx.pbs (+ existing PLAN/RESULTS/etc).

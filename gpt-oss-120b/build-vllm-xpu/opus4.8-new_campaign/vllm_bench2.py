@@ -23,6 +23,46 @@ def _map_pmi_env():
 
 _map_pmi_env()
 
+# Optional: patch vLLM CPU weight-offload to NOT use the CUDA-only UVA op (XPU has no
+# get_cuda_view_from_cpu_tensor). With uva_offloading=False, offloaded params stay as plain
+# CPU tensors (p.data = cpu_data). Enables --cpu-offload-gb on XPU (single-tile experiment).
+if os.environ.get("VLLM_BENCH_XPU_OFFLOAD_PATCH") == "1":
+    try:
+        import vllm.model_executor.models.utils as _mu
+        import torch as _torch
+        _orig = _mu.maybe_offload_to_cpu
+        def _xpu_offload(module):
+            params = next(module.parameters(), None)
+            if params is None or params.device == _torch.device("cpu"):
+                return module
+            if _mu._CPU_OFFLOAD_BYTES >= _mu._CPU_OFFLOAD_MAX_BYTES:
+                return module
+            offloaded = False
+            for p in module.parameters():
+                if _mu._CPU_OFFLOAD_BYTES >= _mu._CPU_OFFLOAD_MAX_BYTES:
+                    break
+                cpu_data = _torch.empty_strided(size=p.data.size(), stride=p.data.stride(),
+                                                dtype=p.data.dtype, layout=p.data.layout,
+                                                device="cpu")
+                cpu_data.copy_(p.data)
+                p.data = cpu_data  # plain CPU tensor, no UVA
+                _mu._CPU_OFFLOAD_BYTES += p.data.numel() * p.data.element_size()
+                offloaded = True
+            if offloaded:
+                _orig_fwd = module.forward
+                _dev = params.device
+                def _fwd(*a, **k):
+                    for p in module.parameters():
+                        if p.data.device.type == "cpu":
+                            p.data = p.data.to(_dev)
+                    return _orig_fwd(*a, **k)
+                module.forward = _fwd
+            return module
+        _mu.maybe_offload_to_cpu = _xpu_offload
+        print("XPU offload patch active (uva_offloading=False, per-fwd copy-to-device)", flush=True)
+    except Exception as _e:
+        print("XPU offload patch FAILED:", _e, flush=True)
+
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -41,31 +81,31 @@ def quality_ok(text, tok_ids):
     return True
 
 
-def run(llm, prompt, params, n_prompt, label):
+def _gen(llm, prompt, max_tokens):
+    from vllm import SamplingParams
+    p = SamplingParams(temperature=0.0, max_tokens=max_tokens, ignore_eos=True)
     t0 = time.perf_counter()
-    out = llm.generate([prompt], params)[0]
+    out = llm.generate([prompt], p)[0]
     wall = time.perf_counter() - t0
     o = out.outputs[0]
-    n_out = len(o.token_ids)
-    m = getattr(out, "metrics", None)
-    ttft = decode_tps = prefill_tps = None
-    src = "fallback_wall"
-    if m is not None and getattr(m, "first_token_time", None) and getattr(m, "arrival_time", None):
-        ttft = m.first_token_time - m.arrival_time
-        src = "engine"
-        if ttft and ttft > 0:
-            prefill_tps = n_prompt / ttft
-        lt = getattr(m, "last_token_time", None)
-        ft = getattr(m, "first_token_time", None)
-        if lt and ft and lt > ft and n_out > 1:
-            decode_tps = (n_out - 1) / (lt - ft)
-    e2e = n_out / wall if wall > 0 else 0.0
-    r = dict(label=label, wall_s=wall, ttft_s=ttft, ttft_source=src,
-             prefill_tok_s=prefill_tps, decode_tok_s=decode_tps, e2e_tok_s=e2e,
-             n_prompt=n_prompt, n_out=n_out, quality_ok=quality_ok(o.text, o.token_ids),
-             text=o.text[:200])
-    print(f"[{label}] ttft={ttft} src={src} prefill_tps={prefill_tps} "
-          f"decode_tps={decode_tps} e2e={e2e:.4f} n_out={n_out} q={r['quality_ok']}", flush=True)
+    return wall, len(o.token_ids), o
+
+
+def run(llm, prompt, params, n_prompt, label, max_tokens):
+    # Two-call method (version-agnostic): t1 = prefill+1 token, tN = prefill + N tokens.
+    # decode_tps = (N-1)/(tN - t1); prefill/ttft ~= t1 (prompt eval + first token).
+    w1, n1, _ = _gen(llm, prompt, 1)
+    wN, nN, oN = _gen(llm, prompt, max_tokens)
+    ttft = w1
+    prefill_tps = (n_prompt / w1) if w1 > 0 else None
+    decode_tps = ((nN - 1) / (wN - w1)) if (wN > w1 and nN > 1) else None
+    e2e = nN / wN if wN > 0 else 0.0
+    q = quality_ok(oN.text, oN.token_ids)
+    r = dict(label=label, ttft_s=ttft, ttft_source="two_call", prefill_tok_s=prefill_tps,
+             decode_tok_s=decode_tps, e2e_tok_s=e2e, n_prompt=n_prompt, n_out=nN,
+             quality_ok=q, text=oN.text[:200])
+    print(f"[{label}] ttft={ttft:.4f}s prefill_tps={prefill_tps} "
+          f"decode_tps={decode_tps} e2e={e2e:.4f} n_out={nN} q={q}", flush=True)
     return r
 
 
@@ -133,9 +173,9 @@ def main():
     print(f"LLM_constructed load_s={time.perf_counter()-t0:.1f}", flush=True)
     params = SamplingParams(temperature=0.0, max_tokens=args.max_tokens)
 
-    cold = run(llm, prompt, params, n_prompt, "cold")
-    warm = run(llm, prompt, params, n_prompt, "warm")
-    warm2 = run(llm, prompt, params, n_prompt, "warm2")
+    cold = run(llm, prompt, params, n_prompt, "cold", args.max_tokens)
+    warm = run(llm, prompt, params, n_prompt, "warm", args.max_tokens)
+    warm2 = run(llm, prompt, params, n_prompt, "warm2", args.max_tokens)
 
     if _rank != 0:
         print("=== done (non-zero rank) ===", flush=True)

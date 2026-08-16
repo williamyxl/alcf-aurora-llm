@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:15:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N fwd-probe
+#PBS -j oe
+
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/fwd_probe.log
+exec > "$LOG" 2>&1
+set -o pipefail
+echo "START $(date -Is) host=$(hostname)"
+source /lus/flare/projects/MatSciAI/xiaoliyan/miniforge3/etc/profile.d/conda.sh
+conda activate /lus/flare/projects/MatSciAI/xiaoliyan/software/conda/envs/vllm-xpu
+export LD_LIBRARY_PATH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p/lib64:${LD_LIBRARY_PATH:-}
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+export PYTHONFAULTHANDLER=1
+python - <<'PY'
+import torch
+print("torch", torch.__version__, "dev", torch.xpu.get_device_properties(0).name)
+import vllm_xpu_kernels._C as _C
+import vllm_xpu_kernels._moe_C as _moe
+print("imports OK")
+
+# Probe the ops vLLM uses in a decode/prefill forward, one at a time.
+def run(name, fn):
+    try:
+        fn(); torch.xpu.synchronize(); print(f"OK  {name}")
+    except Exception as e:
+        print(f"ERR {name}: {type(e).__name__}: {e}")
+
+d="xpu"; bf=torch.bfloat16
+# rms_norm
+def t_rms():
+    x=torch.randn(4,2880,device=d,dtype=bf); w=torch.randn(2880,device=d,dtype=bf)
+    out=torch.empty_like(x); torch.ops._C.rms_norm(out,x,w,1e-6)
+run("rms_norm", t_rms)
+# silu_and_mul (known OK)
+def t_silu():
+    x=torch.randn(4,512,device=d,dtype=bf); o=torch.empty(4,256,device=d,dtype=bf)
+    torch.ops._C.silu_and_mul(o,x)
+run("silu_and_mul", t_silu)
+# reshape_and_cache_flash (KV cache write) — common attn op
+print("ops available in _C:", [x for x in dir(torch.ops._C) if not x.startswith('_')][:40])
+print("DONE")
+PY
+echo "COMPLETION_EXIT=$? $(date -Is)"

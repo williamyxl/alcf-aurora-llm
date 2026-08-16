@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vg-fw
+#PBS -j oe
+set -o pipefail
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+MODEL=${MODEL:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b}
+TP=${TP:-2}; MML=${MML:-4096}; MNS=${MNS:-2}; MEMUTIL=${MEMUTIL:-0.85}; KVGIB=${KVGIB:-8}; MAXTOK=${MAXTOK:-128}; TAG=${TAG:-fw}
+
+source /opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/miniforge3-25.11.0-1-khkcc6i/etc/profile.d/conda.sh
+conda activate /opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp
+export VLLM_XPU_FUSED_MOE_USE_REF=${VLLM_XPU_FUSED_MOE_USE_REF:-1}
+JOBTAG=${PBS_JOBID:-$$}
+export TRITON_CACHE_DIR=/tmp/triton_${JOBTAG} SYCL_CACHE_DIR=/tmp/sycl_${JOBTAG}
+mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+
+echo "host=$(hostname) date=$(date -Is)"
+python -c "import vllm,torch;print('vllm',vllm.__version__,'torch',torch.__version__,'xpu',torch.xpu.device_count())"
+echo "TAG=$TAG MODEL=$MODEL TP=$TP MML=$MML MNS=$MNS"
+
+# oneCCL for TP>1 under PALS
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_ZE_IPC_EXCHANGE=sockets CCL_WORKER_COUNT=1 FI_PROVIDER=cxi
+
+KV_FLAG=""; [ -n "${KVGIB:-}" ] && KV_FLAG="--kv-cache-memory-gib $KVGIB"
+if [ "$TP" -gt 1 ]; then
+  mpiexec -n "$TP" --ppn "$TP" python "$CAMP/vllm_bench2.py" --model "$MODEL" --tp "$TP" --max-model-len "$MML" \
+    --max-num-seqs "$MNS" --gpu-mem-util "$MEMUTIL" --max-tokens "$MAXTOK" --enforce-eager $KV_FLAG \
+    --distributed-executor-backend external_launcher --tag "$TAG"
+else
+  python "$CAMP/vllm_bench2.py" --model "$MODEL" --tp 1 --max-model-len "$MML" \
+    --max-num-seqs "$MNS" --gpu-mem-util "$MEMUTIL" --max-tokens "$MAXTOK" --enforce-eager $KV_FLAG --tag "$TAG"
+fi
+echo "VLLM_RUN_DONE date=$(date -Is)"

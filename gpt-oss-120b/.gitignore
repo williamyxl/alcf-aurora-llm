@@ -114,3 +114,10 @@ build-vllm-xpu/patches/*
 !build-vllm-xpu/patches/mem_info.cpp.aurora-ze-fallback
 !build-vllm-xpu/patches/mem_info.cpp.aurora-ze-fallback.txt
 !build-vllm-xpu/patches/block_table_slot_mapping_torch_fallback.txt
+
+# opus4.8-new_campaign: docs + harness scripts only (no logs / job output)
+!build-vllm-xpu/opus4.8-new_campaign/
+build-vllm-xpu/opus4.8-new_campaign/*
+!build-vllm-xpu/opus4.8-new_campaign/*.md
+!build-vllm-xpu/opus4.8-new_campaign/*.py
+!build-vllm-xpu/opus4.8-new_campaign/*.pbs

@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vg-fw3
+#PBS -j oe
+set -o pipefail
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+MODEL=${MODEL}; TP=${TP:-2}; MML=${MML:-4096}; MNS=${MNS:-2}; MEMUTIL=${MEMUTIL:-0.85}; KVGIB=${KVGIB:-8}; MAXTOK=${MAXTOK:-128}; TAG=${TAG:-fw3}
+OFFLOADGB=${OFFLOADGB:-}; NUMA=${NUMA:-0}
+# Full frameworks module env (sets SYCL/CCL/oneAPI runtime the IPEX Marlin JIT needs)
+module use /opt/aurora/26.26.0/frameworks/modulefiles
+module load frameworks
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp
+export VLLM_XPU_FUSED_MOE_USE_REF=1
+export VLLM_BENCH_XPU_OFFLOAD_PATCH=${VLLM_BENCH_XPU_OFFLOAD_PATCH:-0}
+JOBTAG=${PBS_JOBID:-$$}; export TRITON_CACHE_DIR=/tmp/triton_${JOBTAG} SYCL_CACHE_DIR=/tmp/sycl_${JOBTAG}; mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+echo "host=$(hostname) date=$(date -Is)"
+echo "CCL_CONFIGURATION=$CCL_CONFIGURATION CCL_ROOT=$CCL_ROOT"
+$FWPY -c "import vllm,torch;print('vllm',vllm.__version__,'torch',torch.__version__,'xpu',torch.xpu.device_count())"
+echo "TAG=$TAG MODEL=$MODEL TP=$TP MML=$MML MNS=$MNS"
+KV_FLAG=""; [ -n "${KVGIB:-}" ] && KV_FLAG="--kv-cache-memory-gib $KVGIB"
+OFFLOAD_FLAG=""; [ -n "${OFFLOADGB:-}" ] && OFFLOAD_FLAG="--cpu-offload-gb $OFFLOADGB"
+# Single-tile mask when TP=1 (use tile 0 only)
+[ "$TP" = "1" ] && export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+# NUMA/HBM binding like llama.cpp F4_hbm (socket0 HWTs + HBM node 2)
+PREFIX=""
+if [ "$NUMA" = "1" ]; then PREFIX="numactl --physcpubind=1-51,105-155 --membind=2"; echo "NUMA: $PREFIX"; fi
+echo "OFFLOADGB=${OFFLOADGB:-none} ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-unset}"
+$PREFIX $FWPY "$CAMP/vllm_bench2.py" --model "$MODEL" --tp "$TP" --max-model-len "$MML" \
+  --max-num-seqs "$MNS" --gpu-mem-util "$MEMUTIL" --max-tokens "$MAXTOK" --enforce-eager $KV_FLAG $OFFLOAD_FLAG --tag "$TAG"
+echo "VLLM_RUN_DONE date=$(date -Is)"

@@ -1,0 +1,43 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:40:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ll-f4hbm-ctx
+#PBS -j oe
+
+# llama.cpp SYCL F4_hbm (1-tile MoE->CPU + HBM NUMA) at a chosen context length.
+# -v CTX=<n>  (default 4096).  Logs to logs/llama_f4hbm_ctx${CTX}.log
+CTX=${CTX:-4096}
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/llama_f4hbm_ctx${CTX}.log
+exec > "$LOG" 2>&1
+set -x
+echo "START $(date -Is) host=$(hostname) CTX=$CTX"
+
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
+BIN=$WORKDIR/build-llamacpp-sycl/build/bin
+GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
+
+module load oneapi/release/2025.3.1
+# F4_hbm env
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export GGML_SYCL_ENABLE_VMM=0
+
+ls -lh "$BIN/llama-completion" "$GGUF"
+
+# F4_hbm: 1 tile, MoE experts on CPU (-ncmoe 99), HBM membind=2, 32 threads, fa on
+numactl --physcpubind=1-51,105-155 --membind=2 \
+  "$BIN/llama-completion" \
+  -m "$GGUF" \
+  -p "What is a metal-organic framework (MOF)? Answer in one short paragraph." \
+  -n 128 -c "$CTX" -ngl 99 -sm none \
+  --seed 42 -no-cnv --single-turn --jinja \
+  --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 \
+  --no-mmap --no-display-prompt \
+  -fa on -ncmoe 99 -t 32 --numa numactl
+echo "COMPLETION_EXIT=$?"
+echo "DONE $(date -Is)"
