@@ -1,49 +1,72 @@
-# gpt-oss-120b on Aurora (self-built Torch-XPU + vLLM)
+# gpt-oss-120b on Aurora (PVC / Intel Data Center GPU Max 1550)
 
-Self-contained **Torch-XPU + IPEX + oneCCL + vLLM** stack for ALCF Aurora (PVC / Intel Data Center GPU Max). **No `module load frameworks`.**
+Inference + perf work for gpt-oss-120b MXFP4 on ALCF Aurora. Two engines characterized: **llama.cpp
+SYCL** and **vLLM-XPU**. Decode target **>30 tok/s achieved**.
 
 | | |
 |--|--|
 | Workdir | `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b` |
-| Env | `build-vllm-xpu/env` (Python 3.12) |
-| Model | `models/openai-gpt-oss-120b` (MXFP4 MoE) |
-| Status | Phases 0–6 **CLOSED**; perf **IN PROGRESS** — best practice: [`build-vllm-xpu/BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) |
+| Model (vLLM) | `models/openai-gpt-oss-120b` (HF MXFP4) |
+| Model (llama.cpp) | `models/openai-gpt-oss-120b-mxfp4.gguf` |
+| Status | **WORKING** — vLLM 31.9 tok/s (TP=4), llama.cpp F4_hbm 41.6 tok/s (1 tile) |
 
-## Project gates
+## ⭐ Current best results (2026-08-16) — gpt-oss-120b MXFP4, single stream, decode tok/s, quality-OK
+
+| Engine / recipe | 4096 ctx | 131072 ctx | tiles | prefill tok/s |
+|-----------------|---------:|-----------:|:-----:|--------------:|
+| **llama.cpp F4_hbm** (1-tile MoE→CPU, HBM NUMA) | **41.6** | **38.1** | 1 | ~42–46 |
+| llama.cpp P14_tp2 (2-tile pure GPU) | 34.0 | — | 2 | 495 (pp512) |
+| **vLLM TP=4** (frameworks 0.15, IPEX Marlin) | **31.9** | 31.4 | 4 | ~1670 |
+| vLLM TP=2 | 29.6 | 28.9 | 2 | ~1290 |
+| vLLM old self-built REF-MoE (2026-07, superseded) | ~1.2 | — | 2 | — |
+
+**Start here:** [`build-vllm-xpu/opus4.8-new_campaign/README.md`](build-vllm-xpu/opus4.8-new_campaign/README.md)
+→ full results [`VLLM_RESULTS.md`](build-vllm-xpu/opus4.8-new_campaign/VLLM_RESULTS.md) ·
+recipe [`VLLM_WORKING_RECIPE.md`](build-vllm-xpu/opus4.8-new_campaign/VLLM_WORKING_RECIPE.md) ·
+timestamped debug [`DEBUG_LOG.md`](build-vllm-xpu/opus4.8-new_campaign/DEBUG_LOG.md).
+
+## Two ways to run gpt-oss-120b on Aurora
+
+### A. vLLM via the Aurora frameworks module (recommended for serving / high prefill)
+Use the upgraded **`frameworks/2025.3.1`** env (vllm 0.15 + torch 2.10 + triton 3.6 + ipex 2.10),
+which runs gpt-oss MXFP4 via the **IPEX Marlin** MoE backend. Must run under the *full* `module load
+frameworks` env (sets SYCL/CCL the IPEX Marlin JIT needs).
+```bash
+qsub -q debug-scaling -v MODEL=$PWD/models/openai-gpt-oss-120b,TP=4,MML=4096,MNS=1,MEMUTIL=0.85,KVGIB=8 \
+  -o build-vllm-xpu/opus4.8-new_campaign/logs/vllm_tp4.out \
+  build-vllm-xpu/opus4.8-new_campaign/vllm_run_fw3.pbs
+```
+
+### B. llama.cpp SYCL F4_hbm (fastest decode; only single-tile option)
+```bash
+qsub -q debug-scaling -v CTX=4096 build-vllm-xpu/opus4.8-new_campaign/llama_f4hbm_ctx.pbs   # or CTX=131072
+```
+
+> The old self-built **`build-vllm-xpu/env`** stack (vllm 0.27.1 / torch 2.13) does **not** run on PVC
+> (attention crashes: triton 3.7.2 `get_native` SIGSEGV; SYCL FA2 xe2-only). oneAPI 2026 fixed its ABI
+> but not its attention. Kept for record; do not use for inference. See campaign `DEBUG_LOG.md` P11–P18.
+
+## Historical: self-built stack gates (2026-07, superseded)
 
 | Phase | Status | Artifact |
 |-------|--------|----------|
 | 0–4 Build stack | PASS | `build-vllm-xpu/VERSIONS.md` |
-| 5 Inference | PASS | `build-vllm-xpu/SUCCESS_INFER.md` |
+| 5 Inference (REF MoE, ~1.15 tok/s) | PASS | `build-vllm-xpu/SUCCESS_INFER.md` |
 | 6 LoRA/SFT 1 epoch | PASS | `build-vllm-xpu/SUCCESS_TRAIN.md` |
 
-**Performance (2026-07-21):** **TP=2 is best** for single-stream REF MoE (warm2 ≈ **1.15** e2e tok/s).  
-**Start here:** [`BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) · scaling: [`SCALING_TP248.md`](build-vllm-xpu/perf-team/SCALING_TP248.md)  
-**Session recovery:** [`RESUME.md`](build-vllm-xpu/RESUME.md) · log: [`PERF.md`](build-vllm-xpu/PERF.md) · closure: [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md).
-
-Living log: `build-vllm-xpu/PHASE_STATUS.md`
+Old perf docs (REF MoE ~1.15 e2e tok/s): [`BEST_PRACTICE.md`](build-vllm-xpu/BEST_PRACTICE.md) ·
+[`PERF.md`](build-vllm-xpu/PERF.md) · [`SUCCESS_PERF.md`](build-vllm-xpu/SUCCESS_PERF.md). These are
+superseded by the 2026-08 campaign above (25×+ faster).
 
 ## Quick start — inference
 
-```bash
-cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
-qsub infer_chat.pbs
-# log: build-vllm-xpu/logs/test_gptoss.out
-```
+See **"Two ways to run"** above. Fastest paths:
+- vLLM: `build-vllm-xpu/opus4.8-new_campaign/vllm_run_fw3.pbs` (TP=4, frameworks module)
+- llama.cpp: `build-vllm-xpu/opus4.8-new_campaign/llama_f4hbm_ctx.pbs` (F4_hbm, 1 tile)
 
-Required runtime recipe (also in `SUCCESS_INFER.md` / `infer_chat.pbs`):
+Full recipes + all env details: `build-vllm-xpu/opus4.8-new_campaign/VLLM_WORKING_RECIPE.md`.
 
-- `module load oneapi/release/2025.3.1` only (no frameworks)
-- `ONEAPI_DEVICE_SELECTOR=level_zero:gpu`
-- `TRITON_INTEL_DEVICE_EXTENSIONS="cl_intel_subgroup_matrix_multiply_accumulate cl_intel_subgroup_matrix_multiply_accumulate_tensor_float32 cl_intel_subgroup_2d_block_io cl_intel_bfloat16_conversions"`
-- `VLLM_XPU_FUSED_MOE_USE_REF=1`
-- `attention_backend="TRITON_ATTN"`, **TP=2** (best practice; historical PASS used TP=8)
-- `--kv-cache-memory-gib 8` / `kv_cache_memory_bytes` for TP=2/4 (avoids util-planner OOM)
-- Triton `driver.c` OpenCL try/catch patch (see `build-vllm-xpu/patches/`)
-
-Do **not** put OpenCL in the device selector (`*:gpu` / dual) — Triton smoke may pass, then vLLM multiprocess SEGVs.
-
-## Quick start — LoRA train (1 epoch smoke)
+## Quick start — LoRA train (1 epoch smoke, old self-built stack)
 
 ```bash
 qsub train_lora_smoke.pbs
@@ -56,44 +79,50 @@ Uses Torch+IPEX+PEFT/TRL (not vLLM). Loads with `Mxfp4Config(dequantize=True)`; 
 ## Layout
 
 ```
-workdir/llm/gpt-oss-120b/
+workdir/alcf-aurora-llm/gpt-oss-120b/
   README.md                 # this file
-  models/openai-gpt-oss-120b/
-  checkpoints/lora-smoke/adapter/
-  infer_chat.pbs / one_chat.py / triton_xpu_smoke.py
-  train_lora_smoke.pbs / lora_one_epoch.py
-  build_vllm_xpu_*.pbs      # phased build jobs
+  models/openai-gpt-oss-120b/            # HF MXFP4 (vLLM)
+  models/openai-gpt-oss-120b-mxfp4.gguf  # MXFP4 GGUF (llama.cpp)
+  build-llamacpp-sycl/      # llama.cpp SYCL build + cycle recipes (F4_hbm, P14_tp2, ...)
+    build/bin/              # llama-completion, llama-bench, ...
+    cycles/*.env            # recipe env files
   build-vllm-xpu/
-    BEST_PRACTICE.md        # current recommended recipe (TP=2)
-    env/                    # conda env
-    pins.env
-    VERSIONS.md
-    PHASE_STATUS.md
-    SUCCESS_INFER.md
-    SUCCESS_TRAIN.md
-    SUCCESS_PERF.md         # S2–S5 perf closure
-    PERF.md                 # living perf experiment log
-    RESUME.md               # pause/resume checklist (perf)
-    PERF_PLAN.md
-    perf-team/              # A1–A6 + SCALING_TP248.md
-    patches/                # runtime/source patches
-    xiaoliyan/              # built wheels
-    logs/
+    opus4.8-new_campaign/   # ⭐ 2026-08 campaign: WORKING recipes + results
+      README.md             # campaign index — START HERE
+      VLLM_RESULTS.md       # full results (vLLM TP/context sweep + llama.cpp F4_hbm)
+      VLLM_WORKING_RECIPE.md
+      DEBUG_LOG.md          # timestamped P1–P21
+      vllm_run_fw3.pbs      # working vLLM launcher (frameworks module)
+      llama_f4hbm_ctx.pbs   # llama.cpp F4_hbm runner (CTX param)
+      vllm_bench2.py        # bench (two-call metrics)
+      logs/                 # job output (gitignored)
+    BEST_PRACTICE.md        # OLD self-built recipe (superseded)
+    env/                    # OLD self-built conda env (does not run on PVC)
+    pins.env / VERSIONS.md / PERF.md / SUCCESS_*.md / perf-team/ / patches/
+  build_vllm_xpu_*.pbs      # OLD phased build jobs
+  infer_chat.pbs / one_chat.py / train_lora_smoke.pbs / lora_one_epoch.py
 ```
 
-## Stack versions (summary)
+## Stack versions
 
-See `build-vllm-xpu/VERSIONS.md` for full detail.
+### Working vLLM stack — Aurora `frameworks/2025.3.1` module (use this)
+| Component | Version |
+|-----------|---------|
+| vllm | 0.15.0 |
+| torch | 2.10.0a0 (XPU) |
+| triton | 3.6.0 |
+| IPEX | 2.10.10 |
+| MoE backend | IPEX Marlin (MXFP4) |
+| oneAPI | 2025.3 (frameworks module) |
 
-| Component | Runtime version |
-|-----------|-----------------|
-| torch | 2.10.0a0+git449b176 (XPU/PVC) |
-| triton | **3.6.0+git225cdbde** (frameworks wheel; self-built 3.8 JIT broken) |
-| IPEX | 2.10.10+gitd0f992f |
-| oneccl-bind-pt | 2.8.0+xpu |
-| vllm | 0.1.dev1+g109b736b8 (XPU) |
-| vllm-xpu-kernels | 0.1.dev1+g4002cea90 |
-| peft / trl | 0.19.1 / 1.8.0 |
+### llama.cpp SYCL (built this campaign)
+ggml-org main, SYCL PVC (`-DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_SYCL_DEVICE_ARCH=pvc`),
+`build-llamacpp-sycl/build/bin`.
+
+### Old self-built vLLM stack (superseded; does NOT run on PVC — kept for record)
+See `build-vllm-xpu/VERSIONS.md`. torch 2.10 + triton 3.6 + IPEX 2.10 + vllm 0.1.dev (REF MoE ~1.15
+tok/s). A later self-built vllm 0.27.1 / torch 2.13 attempt (with oneAPI 2026 kernels) crashes in
+attention on PVC.
 
 ## Patches (must re-apply after reinstall)
 
@@ -107,13 +136,23 @@ See `build-vllm-xpu/VERSIONS.md` for full detail.
 
 All smoke/build jobs: `-q debug`, `walltime=00:59:59`, `-A MatSciAI`, `#PBS -j oe`, `filesystems=flare`. One running debug job per user.
 
-## Known pitfalls
+## Known pitfalls / key findings (2026-08 campaign)
 
-1. **OpenCL in `ONEAPI_DEVICE_SELECTOR`** → vLLM SEGV after Triton smoke OK.
-2. **Fused XPU MXFP4 MoE without REF** → all-`!` / token id 0; set `VLLM_XPU_FUSED_MOE_USE_REF=1`.
-3. **FLASH_ATTN alone on gpt-oss XPU** → garbled / zero tokens; use `TRITON_ATTN`.
-4. **Self-built Triton 3.8** → JIT broken; keep 3.6 + Aurora `driver.c` patch.
-5. **TRL default `chunked_nll`** → crashes with `device_map="auto"`; use `loss_type="nll"`.
-6. **MXFP4 training** → transformers requires `Mxfp4Config(dequantize=True)`.
-7. **TP=8 for single-stream** → slow (~0.37 e2e); use **TP=2** (~1.15 e2e) — see `BEST_PRACTICE.md`.
-8. **TP=2/4 without KV pin** → OOM (util planner reserves ~50 GiB KV); use `--kv-cache-memory-gib 8`.
+1. **Max 1550 (PVC) has no native FP4/FP8** (INT4/INT8 only). MXFP4 MoE works via **IPEX Marlin**
+   (vLLM frameworks) or llama.cpp SYCL GGUF kernels — not via the self-built cutlass xe2 MoE (crashes).
+2. **Use the frameworks module for vLLM** (`frameworks/2025.3.1`, vllm 0.15). The older
+   `frameworks/2025.2.0` (vllm 0.10) had no gpt-oss path — source of earlier "frameworks can't run
+   gpt-oss" reports. Run under the *full* `module load frameworks` env, else IPEX Marlin JIT throws
+   `sycl::exception: No device`.
+3. **Self-built vllm 0.27.1 / torch 2.13 does not run on PVC** — triton 3.7.2 `get_native` SIGSEGV and
+   SYCL FA2 is xe2-only. oneAPI 2026 fixes the ABI but not attention.
+4. **vLLM XPU has no weight/MoE CPU-offload** (`cpu_offload_gb` uses a CUDA-only UVA op). The llama.cpp
+   F4_hbm single-tile+CPU-MoE recipe has no vLLM equivalent; min vLLM config is TP=2.
+5. **vLLM decode sweet spot = TP=4** (31.9 tok/s); TP=8 regresses on decode (collective overhead) but
+   wins prefill. Max context (131072) costs only ~1–2% decode (gpt-oss `sliding_window=128`).
+6. **`--kv-cache-memory-gib`** avoids the util-planner OOM (8 at 4096; ~40 at 131072).
+
+### Historical (self-built stack) pitfalls
+7. OpenCL in `ONEAPI_DEVICE_SELECTOR` → vLLM SEGV; fused MXFP4 MoE without REF → all-`!`; FLASH_ATTN
+   alone → garbled (use TRITON_ATTN); self-built Triton 3.8 JIT broken (keep 3.6); TRL `chunked_nll`
+   crashes with `device_map=auto` (use `loss_type="nll"`); MXFP4 training needs `Mxfp4Config(dequantize=True)`.
