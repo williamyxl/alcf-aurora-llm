@@ -325,3 +325,37 @@ Triton/kernel bugs, not ABI. The path that reached tokens (frameworks vllm 0.15)
   | 131072 (max) | 371.6 | 45.8 | **38.07** | 50.7 | 8759441 |
 - **Note:** decode drops ~8% at 128K context (larger KV) but stays ~38 tok/s. This is the TRUE
   single-tile + CPU-MoE-offload deployment (vLLM cannot do this on XPU — see P19).
+
+## P22 — High-concurrency (batched) throughput: vLLM vs llama.cpp on one node
+- **When:** 2026-08-16 06:40–07:36
+- **vLLM continuous batching (frameworks 0.15, IPEX Marlin; vllm_concurrency.py):**
+  | TP | mns | nprompts | agg out tok/s | req/s | job |
+  |----|-----|----------|---------------|-------|-----|
+  | 4 | 64  | 256  | 1031 | 8.1  | 8759507 |
+  | 4 | 128 | 512  | 1561 | 12.2 | 8759526 |
+  | 8 | 128 | 512  | 2049 | 16.0 | 8759545 |
+  | 8 | 256 | 1024 | **3597** | 28.1 | 8759557 |
+  Peak 3597 tok/s output (256-way, TP=8), all quality_ok=1.0. ~113× single-stream. TP=8 > TP=4 for
+  throughput (opposite of single-stream).
+- **llama.cpp batched-bench (2-tile GPU, llama_batched.pbs MODE=gpu2):**
+  | B | gen S_TG tok/s | job |
+  |---|----------------|-----|
+  | 64  | 194 | 8759570 |
+  | 128 | 277 | 8759575 |
+  | 256 | 417 | 8759594 |
+- **vLLM wins concurrency 5.3× (64) → 8.6× (256).** vLLM = serving engine; llama.cpp = single-stream.
+- Full writeup: `CONCURRENCY_RESULTS.md`.
+
+## P23 — Full-node deployment: vLLM all-12-tiles (DP) vs 12× llama.cpp MoE-offload instances
+- **When:** 2026-08-16 14:44–15:20
+- **Constraint:** gpt-oss heads=64, kv_heads=8 → valid vLLM TP∈{2,4,8}; **TP=12 invalid**. Use all 12
+  tiles via data parallelism: 3× TP=4 (disjoint ZE_AFFINITY_MASK). Harness `vllm_dp_node.pbs`.
+- **vLLM 3×TP4 (12 tiles):** mns=64 → 2939 tok/s (8759967); **mns=128 → 4565 tok/s** (8760023), 35.7 req/s, quality OK.
+- **llama.cpp 12× single-tile MoE→CPU:** mmap-shared → **GPU segfault** (mmap + CPU tensor override
+  incompatible with GPU offload, job 8759985). `--no-mmap` 6 instances → **only 109.9 tok/s** node agg
+  (per-inst 15–23 tok/s, job 8760000): CPU-MoE offload contends for shared CPU/HBM bandwidth; does NOT
+  scale across instances, and 12× no-mmap copies blow host RAM.
+- **Conclusion:** vLLM DOES use all 12 tiles (3×TP4) → **~4565 tok/s full-node**, ~9× the best llama.cpp
+  full-node (2-tile GPU batched 417) and ~40× the 6× MoE-offload (110). The "12 llama.cpp instances"
+  idea doesn't multiply single-stream speed because that speed depends on CPU-MoE offload that saturates
+  under replication. For full-node serving, vLLM wins decisively. Details: CONCURRENCY_RESULTS.md.

@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vg-conc
+#PBS -j oe
+set -o pipefail
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+MODEL=${MODEL:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b}
+TP=${TP:-4}; MML=${MML:-4096}; MNS=${MNS:-64}; NPROMPTS=${NPROMPTS:-256}; MAXTOK=${MAXTOK:-128}
+MEMUTIL=${MEMUTIL:-0.85}; KVGIB=${KVGIB:-16}; TAG=${TAG:-conc}
+module use /opt/aurora/26.26.0/frameworks/modulefiles
+module load frameworks
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp
+export VLLM_XPU_FUSED_MOE_USE_REF=1
+JOBTAG=${PBS_JOBID:-$$}; export TRITON_CACHE_DIR=/tmp/triton_${JOBTAG} SYCL_CACHE_DIR=/tmp/sycl_${JOBTAG}; mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+echo "host=$(hostname) date=$(date -Is)"
+$FWPY -c "import vllm,torch;print('vllm',vllm.__version__,'xpu',torch.xpu.device_count())"
+echo "TAG=$TAG TP=$TP MML=$MML MNS=$MNS NPROMPTS=$NPROMPTS MAXTOK=$MAXTOK"
+KV_FLAG=""; [ -n "${KVGIB:-}" ] && KV_FLAG="--kv-cache-memory-gib $KVGIB"
+$FWPY "$CAMP/vllm_concurrency.py" --model "$MODEL" --tp "$TP" --max-model-len "$MML" \
+  --max-num-seqs "$MNS" --num-prompts "$NPROMPTS" --max-tokens "$MAXTOK" \
+  --gpu-mem-util "$MEMUTIL" $KV_FLAG --tag "$TAG"
+echo "VLLM_CONC_DONE date=$(date -Is)"

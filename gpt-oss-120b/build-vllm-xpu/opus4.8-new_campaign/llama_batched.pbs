@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:40:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ll-batched
+#PBS -j oe
+
+# llama.cpp batched-bench: aggregate throughput at parallel batch sizes.
+# -v MODE=gpu2|moecpu  NP=<parallel seqs>  CTX=<total ctx>
+MODE=${MODE:-gpu2}; NP=${NP:-64}; CTX=${CTX:-8192}; PP=${PP:-64}; TG=${TG:-128}
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/logs/llama_batched_${MODE}_np${NP}.log
+exec > "$LOG" 2>&1
+set -x
+echo "START $(date -Is) host=$(hostname) MODE=$MODE NP=$NP CTX=$CTX PP=$PP TG=$TG"
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
+BIN=$WORKDIR/build-llamacpp-sycl/build/bin
+GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu GGML_SYCL_ENABLE_VMM=0
+
+# batched-bench: -npp prompt lens, -ntg gen lens, -npl parallel counts
+if [ "$MODE" = "gpu2" ]; then
+  # 2-tile pure GPU (all layers on GPU) — best for batching
+  export ZE_AFFINITY_MASK=0,1
+  "$BIN/llama-batched-bench" -m "$GGUF" -c "$CTX" -ngl 99 -fa on \
+    -sm layer -ts 0.5,0.5 --no-mmap \
+    -npp "$PP" -ntg "$TG" -npl "$NP"
+elif [ "$MODE" = "moecpu" ]; then
+  # F4_hbm-style: 1 tile + MoE on CPU + HBM bind
+  export ZE_AFFINITY_MASK=0
+  numactl --physcpubind=1-51,105-155 --membind=2 \
+  "$BIN/llama-batched-bench" -m "$GGUF" -c "$CTX" -ngl 99 -fa on \
+    -sm none -ncmoe 99 -t 32 --numa numactl --no-mmap \
+    -npp "$PP" -ntg "$TG" -npl "$NP"
+fi
+echo "COMPLETION_EXIT=$? $(date -Is)"

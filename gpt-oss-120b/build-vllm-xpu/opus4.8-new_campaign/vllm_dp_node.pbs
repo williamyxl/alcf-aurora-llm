@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N vg-dpnode
+#PBS -j oe
+
+# Fill a full node with N_REPLICAS independent vLLM engines, each TP tiles, disjoint
+# ZE_AFFINITY_MASK. Analogue of running many single-tile llama.cpp instances.
+# -v NREP=3 TPE=4  -> 3 x TP4 = 12 tiles. Or NREP=6 TPE=2 = 12 tiles.
+set -o pipefail
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+MODEL=${MODEL:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b}
+NREP=${NREP:-3}; TPE=${TPE:-4}; MML=${MML:-4096}; MNS=${MNS:-64}; NPROMPTS=${NPROMPTS:-256}
+MAXTOK=${MAXTOK:-128}; MEMUTIL=${MEMUTIL:-0.85}; KVGIB=${KVGIB:-12}; TAG=${TAG:-dpnode}
+module use /opt/aurora/26.26.0/frameworks/modulefiles
+module load frameworks
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp VLLM_XPU_FUSED_MOE_USE_REF=1
+echo "host=$(hostname) date=$(date -Is) NREP=$NREP TPE=$TPE (tiles used=$((NREP*TPE)))"
+
+pids=(); T0=$(date +%s.%N)
+for r in $(seq 0 $((NREP-1))); do
+  lo=$((r*TPE)); mask=""
+  for t in $(seq 0 $((TPE-1))); do mask="$mask,$((lo+t))"; done
+  mask=${mask#,}
+  JOBTAG=${PBS_JOBID:-$$}_r${r}
+  (
+    export ZE_AFFINITY_MASK=$mask
+    export TRITON_CACHE_DIR=/tmp/triton_${JOBTAG} SYCL_CACHE_DIR=/tmp/sycl_${JOBTAG}
+    mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+    echo "[replica $r] ZE_AFFINITY_MASK=$mask starting"
+    $FWPY "$CAMP/vllm_concurrency.py" --model "$MODEL" --tp "$TPE" --max-model-len "$MML" \
+      --max-num-seqs "$MNS" --num-prompts "$NPROMPTS" --max-tokens "$MAXTOK" \
+      --gpu-mem-util "$MEMUTIL" --kv-cache-memory-gib "$KVGIB" --tag "${TAG}_r${r}" \
+      > "$CAMP/logs/${TAG}_r${r}.out" 2>&1
+    echo "[replica $r] done rc=$?"
+  ) &
+  pids+=($!)
+  sleep 20   # stagger startup to avoid load thundering herd
+done
+for p in "${pids[@]}"; do wait "$p"; done
+T1=$(date +%s.%N)
+echo "ALL_REPLICAS_DONE wall=$(echo "$T1-$T0"|bc)s date=$(date -Is)"
+echo "=== per-replica CONC_JSON ==="
+grep -h "CONC_JSON=" "$CAMP"/logs/${TAG}_r*.out 2>/dev/null
+echo "=== node aggregate ==="
+$FWPY - "$CAMP" "$TAG" "$NREP" <<'PY'
+import sys, glob, json
+camp, tag, nrep = sys.argv[1], sys.argv[2], int(sys.argv[3])
+tot=0.0; reqs=0.0; n=0
+for f in glob.glob(f"{camp}/logs/{tag}_r*.out"):
+    for line in open(f, errors="ignore"):
+        if line.startswith("CONC_JSON="):
+            d=json.loads(line.split("=",1)[1]); tot+=d["agg_output_tok_s"]; reqs+=d["req_per_s"]; n+=1
+print(f"NODE_AGGREGATE replicas={n} sum_output_tok_s={tot:.1f} sum_req_s={reqs:.2f}")
+PY

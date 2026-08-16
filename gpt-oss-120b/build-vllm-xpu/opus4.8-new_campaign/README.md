@@ -7,11 +7,13 @@ now runs at **31.9 tok/s decode (TP=4)**, and llama.cpp F4_hbm hits **41.6 tok/s
 ## Read these first
 | Doc | Contents |
 |-----|----------|
-| **`VLLM_RESULTS.md`** | Full results tables (vLLM TP sweep, context sweep, llama.cpp F4_hbm) + recipes + engine comparison. **Start here.** |
+| **`BEST_RECIPES.md`** | ⭐ The two production recipes: vLLM full-node (concurrency) + llama.cpp F4_hbm (single user). **Start here.** |
+| **`VLLM_RESULTS.md`** | Full results tables (vLLM TP sweep, context sweep, llama.cpp F4_hbm) + engine comparison. |
 | **`VLLM_WORKING_RECIPE.md`** | The exact working vLLM stack + launch recipe. |
 | **`DEBUG_LOG.md`** | Timestamped problem→solution log (P1–P21). Every fix and dead end. |
 | `RESULTS.md` | llama.cpp best-recipe reruns (F4_hbm, P14_tp2, Inkling MO1/PG10). |
 | `VLLM_INVESTIGATION.md` | Root-cause narrative for the vLLM slowness/crashes. |
+| **`CONCURRENCY_RESULTS.md`** | High-concurrency (batched) throughput: vLLM vs llama.cpp on one node. |
 | `PLAN.md`, `E9_parity_audit.md` | Original E1–E9 experiment design + parity audit. |
 | `SESSION_RECOVERY.md` | Cross-session state/recovery notes. |
 
@@ -24,6 +26,24 @@ now runs at **31.9 tok/s decode (TP=4)**, and llama.cpp F4_hbm hits **41.6 tok/s
 | vLLM TP=4 (frameworks 0.15, IPEX Marlin) | **31.9** | 31.4 | 4 | ~1670 |
 | vLLM TP=2 | 29.6 | 28.9 | 2 | ~1290 |
 | vLLM old REF-MoE (historical) | ~1.2 | — | 2 | — |
+
+## High-concurrency (batched serving, one node) — see `CONCURRENCY_RESULTS.md`
+
+| Concurrency | vLLM agg gen tok/s (best TP) | llama.cpp agg gen tok/s (2-tile GPU) |
+|-------------|----------------------------:|-------------------------------------:|
+| 64-way  | 1031 | 194 |
+| 128-way | 2049 | 277 |
+| **256-way** | **3597** (TP=8) | 417 |
+
+**vLLM continuous batching peaks at ~3597 tok/s aggregate (256-way, TP=8) — ~113× single-stream and
+~8.6× llama.cpp.** For serving, use vLLM; for single-stream/single-tile, use llama.cpp.
+
+## ⭐ Production recipes (see `BEST_RECIPES.md`)
+
+| Workload | Recipe | Throughput | Launcher |
+|----------|--------|-----------|----------|
+| **High concurrency / serving** | **vLLM 3× TP=4 (12 tiles, full node)** | ~4565 tok/s agg, 36 req/s | `vllm_dp_node.pbs` |
+| **Single user / low latency** | **llama.cpp F4_hbm (1 tile, MoE→CPU)** | 41.6 tok/s decode | `llama_f4hbm_ctx.pbs` |
 
 ## Working recipes (one-liners)
 

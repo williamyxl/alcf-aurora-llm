@@ -20,10 +20,15 @@ SYCL** and **vLLM-XPU**. Decode target **>30 tok/s achieved**.
 | vLLM TP=2 | 29.6 | 28.9 | 2 | ~1290 |
 | vLLM old self-built REF-MoE (2026-07, superseded) | ~1.2 | — | 2 | — |
 
+**Production recipes:** [`BEST_RECIPES.md`](build-vllm-xpu/opus4.8-new_campaign/BEST_RECIPES.md) —
+vLLM full-node (concurrency) + llama.cpp F4_hbm (single user).
 **Start here:** [`build-vllm-xpu/opus4.8-new_campaign/README.md`](build-vllm-xpu/opus4.8-new_campaign/README.md)
 → full results [`VLLM_RESULTS.md`](build-vllm-xpu/opus4.8-new_campaign/VLLM_RESULTS.md) ·
-recipe [`VLLM_WORKING_RECIPE.md`](build-vllm-xpu/opus4.8-new_campaign/VLLM_WORKING_RECIPE.md) ·
+concurrency [`CONCURRENCY_RESULTS.md`](build-vllm-xpu/opus4.8-new_campaign/CONCURRENCY_RESULTS.md) ·
 timestamped debug [`DEBUG_LOG.md`](build-vllm-xpu/opus4.8-new_campaign/DEBUG_LOG.md).
+
+**Full-node serving:** vLLM 3× TP=4 (all 12 tiles) → **~4565 tok/s aggregate** (36 req/s), ~9–40× the
+best llama.cpp full-node option. **Single user:** llama.cpp F4_hbm (1 tile) → **41.6 tok/s** decode.
 
 ## Two ways to run gpt-oss-120b on Aurora
 

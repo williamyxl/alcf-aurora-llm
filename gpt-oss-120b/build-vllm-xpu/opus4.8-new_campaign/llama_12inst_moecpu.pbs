@@ -1,0 +1,64 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ll-12inst
+#PBS -j oe
+
+# Fill the node with N_INST single-tile llama.cpp instances, each MoE->CPU (F4_hbm style),
+# running batched-bench with NP parallel sequences. Measure summed steady-state gen tok/s.
+# -v NINST=12 NP=16 CTX=8192
+set -o pipefail
+CAMP=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
+BIN=$WORKDIR/build-llamacpp-sycl/build/bin
+GGUF=$WORKDIR/models/openai-gpt-oss-120b-mxfp4.gguf
+NINST=${NINST:-12}; NP=${NP:-16}; CTX=${CTX:-8192}; PP=${PP:-64}; TG=${TG:-128}; TAG=${TAG:-ll12}
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu GGML_SYCL_ENABLE_VMM=0
+
+# 2 sockets x ~52 physical cores (HWT 1-51,105-155 sock0; 53-103,157-207 sock1 on Aurora).
+# Give each instance a disjoint CPU block + its socket's HBM NUMA node.
+# Sockets: tiles 0-5 -> socket0 (HBM node 2), tiles 6-11 -> socket1 (HBM node 3).
+# ~8 cores/instance to avoid oversubscription (6 inst/socket * 8 = 48 cores/socket).
+THREADS=${THREADS:-8}
+sock0_cores=(1 9 17 25 33 41 49 105); : # placeholder; we compute ranges below
+
+echo "host=$(hostname) date=$(date -Is) NINST=$NINST NP=$NP THREADS=$THREADS"
+pids=(); T0=$(date +%s.%N)
+for i in $(seq 0 $((NINST-1))); do
+  if [ "$i" -lt 6 ]; then sock=0; hbm=2; base=$((1 + i*8)); else sock=1; hbm=3; base=$((53 + (i-6)*8)); fi
+  cpus="${base}-$((base+THREADS-1))"
+  (
+    export ZE_AFFINITY_MASK=$i
+    export TRITON_CACHE_DIR=/tmp/tc_${PBS_JOBID:-$$}_$i SYCL_CACHE_DIR=/tmp/sc_${PBS_JOBID:-$$}_$i
+    mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+    echo "[inst $i] tile=$i cpus=$cpus hbm=$hbm"
+    numactl --physcpubind=$cpus --membind=$hbm \
+      "$BIN/llama-batched-bench" -m "$GGUF" -c "$CTX" -ngl 99 -fa on \
+      -sm none -ncmoe 99 -t $THREADS --numa numactl --no-mmap \
+      -npp "$PP" -ntg "$TG" -npl "$NP" \
+      > "$CAMP/logs/${TAG}_i${i}.out" 2>&1
+    echo "[inst $i] done rc=$?"
+  ) &
+  pids+=($!)
+  sleep 8
+done
+for p in "${pids[@]}"; do wait "$p"; done
+T1=$(date +%s.%N)
+echo "ALL_INST_DONE wall=$(echo "$T1-$T0"|bc)s date=$(date -Is)"
+echo "=== per-instance S_TG rows ==="
+for i in $(seq 0 $((NINST-1))); do
+  row=$(grep -aE "^\| *$PP " "$CAMP/logs/${TAG}_i${i}.out" 2>/dev/null | tail -1)
+  echo "inst $i: $row"
+done
+echo "=== node aggregate S_TG ==="
+awk -v camp="$CAMP" -v tag="$TAG" -v n="$NINST" -v pp="$PP" '
+BEGIN{sum=0;cnt=0;
+  for(i=0;i<n;i++){f=camp"/logs/"tag"_i"i".out";
+    while((getline line < f)>0){ if(line ~ /^\| *[0-9]/){split(line,a,"|"); stg=a[9]+0; if(stg>0){last=stg}}}
+    if(last>0){sum+=last;cnt++;last=0} close(f)}
+  printf "NODE_AGGREGATE_LLAMA instances=%d sum_gen_tok_s=%.1f\n", cnt, sum}'
