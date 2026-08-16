@@ -8,6 +8,7 @@ now runs at **31.9 tok/s decode (TP=4)**, and llama.cpp F4_hbm hits **41.6 tok/s
 | Doc | Contents |
 |-----|----------|
 | **`BEST_RECIPES.md`** | ⭐ The two production recipes: vLLM full-node (concurrency) + llama.cpp F4_hbm (single user). **Start here.** |
+| **`VLLM_SERVING_RECIPE.md`** | Production hosting: vLLM high-concurrency service (capacity queue, week-long, `serve/`). |
 | **`VLLM_RESULTS.md`** | Full results tables (vLLM TP sweep, context sweep, llama.cpp F4_hbm) + engine comparison. |
 | **`VLLM_WORKING_RECIPE.md`** | The exact working vLLM stack + launch recipe. |
 | **`DEBUG_LOG.md`** | Timestamped problem→solution log (P1–P21). Every fix and dead end. |
