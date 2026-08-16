@@ -121,3 +121,10 @@ build-vllm-xpu/opus4.8-new_campaign/*
 !build-vllm-xpu/opus4.8-new_campaign/*.md
 !build-vllm-xpu/opus4.8-new_campaign/*.py
 !build-vllm-xpu/opus4.8-new_campaign/*.pbs
+# serve/ subdir: docs + scripts (not logs, not ENDPOINT.txt/STOP)
+!build-vllm-xpu/opus4.8-new_campaign/serve/
+build-vllm-xpu/opus4.8-new_campaign/serve/*
+!build-vllm-xpu/opus4.8-new_campaign/serve/*.md
+!build-vllm-xpu/opus4.8-new_campaign/serve/*.py
+!build-vllm-xpu/opus4.8-new_campaign/serve/*.pbs
+!build-vllm-xpu/opus4.8-new_campaign/serve/*.sh

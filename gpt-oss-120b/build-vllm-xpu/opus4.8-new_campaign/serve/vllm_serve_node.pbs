@@ -1,0 +1,110 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=168:00:00
+#PBS -q capacity
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-serve
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/serve/logs/serve.out
+
+# Persistent gpt-oss-120b serving on ONE Aurora node (capacity queue, up to 1 week):
+#   3 x `vllm serve` (TP=4, disjoint tiles) + round-robin LB on :$LB_PORT.
+#   Writes endpoint to serve/ENDPOINT.txt. Runs until walltime or serve/STOP.
+# Submit:  qsub serve/vllm_serve_node.pbs
+# Stop:    touch serve/STOP   (graceful) or qdel <jobid>
+# Optional: set AUTO_RESUBMIT=1 (env in qsub -v) to chain a successor near walltime.
+
+set -o pipefail
+SERVE=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/build-vllm-xpu/opus4.8-new_campaign/serve
+MODEL=${MODEL:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b/models/openai-gpt-oss-120b}
+NREP=${NREP:-3}; TPE=${TPE:-4}; MML=${MML:-4096}; MNS=${MNS:-128}; MEMUTIL=${MEMUTIL:-0.85}; KVGIB=${KVGIB:-20}
+LB_PORT=${LB_PORT:-8000}; BASE_PORT=${BASE_PORT:-8001}
+AUTO_RESUBMIT=${AUTO_RESUBMIT:-0}         # 1 = chain a successor near walltime (usually not needed for 1-week job)
+RESUBMIT_MARGIN=${RESUBMIT_MARGIN:-900}   # resubmit successor this many secs before walltime
+WALL_SECS=${WALL_SECS:-604800}            # 168h; must match #PBS walltime
+mkdir -p "$SERVE/logs"
+
+module use /opt/aurora/26.26.0/frameworks/modulefiles
+module load frameworks
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+VLLM=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/vllm
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp VLLM_XPU_FUSED_MOE_USE_REF=1
+
+# Honor STOP even when launched by a chained afterany-dependency (clean chain shutdown).
+if [ -f "$SERVE/STOP" ]; then
+  echo "$(date -Is) STOP file present at startup; exiting without serving (job $PBS_JOBID)."
+  exit 0
+fi
+
+NODE_IP=$(hostname -i | awk '{print $1}'); NODE=$(hostname)
+echo "$(date -Is) serving on node=$NODE ip=$NODE_IP job=$PBS_JOBID"
+
+# --- launch N engines, each TP=TPE on a disjoint tile group ---
+pids=(); backends=()
+for r in $(seq 0 $((NREP-1))); do
+  lo=$((r*TPE)); mask=""
+  for t in $(seq 0 $((TPE-1))); do mask="$mask,$((lo+t))"; done
+  mask=${mask#,}
+  port=$((BASE_PORT + r))
+  backends+=("http://127.0.0.1:$port")
+  JT=${PBS_JOBID}_r${r}
+  (
+    export ZE_AFFINITY_MASK=$mask
+    export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+    export TRITON_CACHE_DIR=/tmp/tc_${JT} SYCL_CACHE_DIR=/tmp/sc_${JT}; mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+    echo "[engine $r] tiles=$mask port=$port"
+    KVBYTES=$(( KVGIB * 1073741824 ))
+    "$VLLM" serve "$MODEL" \
+      --tensor-parallel-size "$TPE" --max-model-len "$MML" --max-num-seqs "$MNS" \
+      --gpu-memory-utilization "$MEMUTIL" --kv-cache-memory-bytes "$KVBYTES" \
+      --enforce-eager --served-model-name gpt-oss-120b \
+      --host 127.0.0.1 --port "$port" > "$SERVE/logs/engine_r${r}.out" 2>&1
+  ) &
+  pids+=($!)
+  sleep 15
+done
+
+# --- wait for engines to become ready ---
+for b in "${backends[@]}"; do
+  for _ in $(seq 1 60); do
+    curl -sf "$b/health" >/dev/null 2>&1 && { echo "ready: $b"; break; }
+    sleep 10
+  done
+done
+
+# --- start LB (bind all interfaces so intra-cluster clients can reach NODE_IP:LB_PORT) ---
+"$FWPY" "$SERVE/lb.py" --host 0.0.0.0 --port "$LB_PORT" --backends "${backends[@]}" \
+  > "$SERVE/logs/lb.out" 2>&1 &
+LB_PID=$!
+
+# --- publish endpoint for clients ---
+cat > "$SERVE/ENDPOINT.txt" <<EOF
+node=$NODE
+ip=$NODE_IP
+lb_url=http://$NODE_IP:$LB_PORT/v1
+model=gpt-oss-120b
+job=$PBS_JOBID
+started=$(date -Is)
+engines=${backends[*]}
+EOF
+echo "ENDPOINT: http://$NODE_IP:$LB_PORT/v1  (see $SERVE/ENDPOINT.txt)"
+
+# --- optional: self-resubmit successor before walltime (only if AUTO_RESUBMIT=1) ---
+if [ "$AUTO_RESUBMIT" = "1" ] && [ ! -f "$SERVE/STOP" ]; then
+  ( sleep $((WALL_SECS - RESUBMIT_MARGIN))
+    [ -f "$SERVE/STOP" ] || qsub -v AUTO_RESUBMIT=1 -W depend=afterany:$PBS_JOBID "$SERVE/vllm_serve_node.pbs" \
+      > "$SERVE/logs/resubmit.out" 2>&1
+  ) &
+fi
+
+# --- keep the job alive until walltime; die if all engines die ---
+while :; do
+  sleep 60
+  [ -f "$SERVE/STOP" ] && { echo "STOP file present; shutting down"; break; }
+  live=0; for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && live=$((live+1)); done
+  [ "$live" = "0" ] && { echo "all engines exited"; break; }
+done
+kill "$LB_PID" 2>/dev/null; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+echo "$(date -Is) serve job $PBS_JOBID exiting"
