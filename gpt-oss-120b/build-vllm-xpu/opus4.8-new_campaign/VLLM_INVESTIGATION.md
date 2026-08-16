@@ -71,6 +71,59 @@ Ref: Intel — Accelerating LLMs on Intel GPUs (BigDL-LLM): PVC supports INT4/IN
 - So on PVC, MXFP4 in vLLM is either **slow (old REF)** or **broken (new fused)** — both because the
   quant format doesn't match the hardware's native INT4/INT8 units.
 
+## 3b. UPDATE (2026-08-15 PM): prebuilt 0.27.1 wheels SIGSEGV on PVC for ANY model
+
+Isolation experiments proved the failure is **not** MoE- or checkpoint-specific:
+
+| Test | Model | Attn | MoE | Result |
+|------|-------|------|-----|--------|
+| 8758589 | gpt-oss BF16 TP=4 | TRITON | Triton (patched) | load OK → **SIGSEGV** in forward |
+| 8758626 | **opt-125m** (dense, no MoE) TP=1 | TRITON | n/a | **SIGSEGV** in forward |
+| 8758629 | opt-125m TP=1 | FLASH | n/a | **SIGSEGV** in forward |
+| 8758642 | opt-125m TP=1, no prefix-cache/chunked-prefill | FLASH | n/a | **SIGSEGV** in forward |
+| 8758636 | kernel probe | — | — | torch-XPU matmul OK; `_C`/`_moe_C` import OK; `silu_and_mul` OK |
+
+**Conclusion:** basic vllm_xpu_kernels ops and torch-XPU compute work on PVC, but the **full model
+forward (attention + KV) SIGSEGVs on PVC regardless of model, attention backend, or MoE path.** The
+prebuilt `vllm 0.27.1` / `vllm_xpu_kernels 0.1.13.2` / `torch 2.13+xpu` wheels are validated on
+**Xe2/Xe3 client GPUs** and are **not compatible with Xe-HPC PVC (Max 1550)**. `is_xe2_arch()` also
+false-positives on PVC, so the library mis-targets kernels. This is a **prebuilt-wheel/hardware
+mismatch**, on top of the FP4-not-native fact.
+
+**Decision (user):** keep **MXFP4** (dtype casting is NOT the 30× cause — BF16 was ~3 tok/s). FP16
+path abandoned. A working vLLM on PVC needs either the **project's older self-built stack** (which ran
+MXFP4 REF ~1.2 tok/s) or **vllm_xpu_kernels built from source for Xe-HPC/PVC**. Prebuilt wheels are a
+dead end on this hardware.
+
+## 3c. UPDATE 2 (2026-08-15 late): source-built PVC kernels — compile fixed, still SIGSEGV
+
+Pursued building `vllm_xpu_kernels` from source AOT-targeted for PVC (the CMake default
+`AOT_DEVICES` includes `pvc`; `is_xe2_arch()` intentionally groups `intel_gpu_pvc`, so PVC *is* a
+supported target using the `csrc/xpu/attn/xe_2/` kernels).
+
+- **Compile blocker (fixed):** `csrc/utils/mem_info.cpp` uses
+  `ze_device_usablemem_size_ext_properties_t` / `currUsableMemSize`, absent from Aurora's Level-Zero
+  headers. Applied the project's existing `patches/mem_info.cpp.aurora-ze-fallback` (guards with
+  `#if defined(...)`, falls back to `getTotalMemory`). **Build then SUCCEEDED**:
+  `vllm-xpu-kernels-0.1.dev1+g13013c599` installed (job 8758898, PIP_RC=0).
+- **Still SIGSEGV at runtime** (job 8758912, MXFP4 TP=2): the source-built `.so` was linked with the
+  oneAPI **module** (icpx 2025.3) loaded at build time, but runtime uses torch's bundled oneAPI 2026
+  (module unloaded). The resulting libsycl/libur ABI mismatch (same `urDeviceWaitExp` family) crashes
+  during engine-core init, **before** weight load. Prebuilt-wheel path crashed later (in the forward);
+  source path crashes earlier (link/ABI).
+
+**Net:** two oneAPI toolchains are in play and incompatible:
+- torch 2.13+xpu bundles **oneAPI 2026** runtime (needed for torch to import).
+- Aurora's `icpx` compiler is **oneAPI 2025.3** (only way to build SYCL kernels here).
+Kernels built with 2025.3 don't load cleanly against torch's 2026 runtime, and loading the 2025.3
+module to satisfy them breaks torch. This toolchain split is the practical wall for a from-scratch
+vLLM-XPU on Aurora with the current wheels.
+
+**Open path (next session):** build torch-XPU **from source with the same oneAPI 2025.3** as the
+kernels (the project's original `build_vllm_xpu_*` intent), so torch + kernels share one ABI — OR find
+a torch-XPU wheel built against oneAPI 2025.3. This is the project's documented self-built-stack route;
+the prebuilt-wheel shortcut cannot reconcile the two oneAPI versions on PVC.
+
 ## 4. The fix direction (per hardware reality)
 
 **Do not use MXFP4 on PVC.** Options, best-first for a *working+faster* vLLM:

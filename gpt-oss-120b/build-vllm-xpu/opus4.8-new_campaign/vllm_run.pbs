@@ -42,11 +42,17 @@ export ZES_ENABLE_SYSMAN=1
 # Disable HF checkpoint page-cache prefetch (8 ranks prefetching 218GB OOMs the node)
 export VLLM_XPU_FORCE_TRITON_MOE=1
 export HF_HUB_DISABLE_XET=0
+export VLLM_BENCH_SIMPLE_SCHED=${VLLM_BENCH_SIMPLE_SCHED:-0}
+export VLLM_BENCH_NO_CUSTOM_OPS=${VLLM_BENCH_NO_CUSTOM_OPS:-0}
+# PVC (Xe-HPC) is neither Xe2 client nor Xe3; the xe2 cutlass grouped-GEMM segfaults on it.
+# Force the generic xe_default kernel path (built in via VLLM_XPU_ENABLE_XE_DEFAULT=ON).
+export VLLM_XPU_FORCE_XE_DEFAULT_KERNEL=${VLLM_XPU_FORCE_XE_DEFAULT_KERNEL:-1}
 # gpt-oss on XPU: FLASH_ATTN garbles/segfaults; force Triton attention (project docs).
 export VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}
 export TORCHINDUCTOR_COMPILE_THREADS=1
 export HF_HUB_OFFLINE=1
 export TMPDIR=/tmp
+export LD_LIBRARY_PATH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p/lib64:${LD_LIBRARY_PATH:-}
 # oneCCL: use MPI transport via Aurora PALS (mpiexec provides PMI to each rank).
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_ATL_TRANSPORT=mpi

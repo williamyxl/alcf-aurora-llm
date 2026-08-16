@@ -1,6 +1,56 @@
 # Session recovery — vLLM-XPU bring-up + slowness investigation (Aurora PVC)
 
-**Last updated:** 2026-08-15 ~15:58 UTC — **PAUSED for new session.** No jobs queued/running.
+**Last updated:** 2026-08-15 ~21:45 UTC — **PAUSED.** No jobs queued/running.
+
+## UPDATE 2 (21:45) — MXFP4 refocus + source-built PVC kernels
+
+Per user: **keep MXFP4, forget FP16** (casting is NOT the 30× cause). Investigation deepened:
+
+- **Isolation proved** the prebuilt `vllm 0.27.1` / `vllm_xpu_kernels 0.1.13.2` wheels **SIGSEGV in the
+  forward on PVC for ANY model** (even dense opt-125m, both FLASH_ATTN and TRITON_ATTN, with/without
+  prefix-cache) — a prebuilt-wheel↔Xe-HPC mismatch, not MoE/checkpoint specific.
+- **Basic ops work** (torch-XPU matmul, `silu_and_mul`, kernel import) — only full model forward crashes.
+- **Built vllm_xpu_kernels from source AOT-targeted for PVC** (CMake supports `pvc`). Fixed the
+  `mem_info.cpp` Level-Zero compile error with the project's `patches/mem_info.cpp.aurora-ze-fallback`.
+  **Build succeeded** (`0.1.dev1+g13013c599`, job 8758898). Source tree:
+  `build-vllm-xpu/build-src/vllm-xpu-kernels`.
+- **But source-built kernels still SIGSEGV** (job 8758912) at engine-core init: **oneAPI ABI split** —
+  kernels built with Aurora `icpx` 2025.3 vs torch's bundled oneAPI 2026 runtime. Loading the 2025.3
+  module to satisfy the kernels breaks torch (`libsycl urDeviceWaitExp`); not loading it, the kernels
+  crash. See `VLLM_INVESTIGATION.md §3c`.
+
+### THE key next step (start here)
+The two oneAPI versions must match. Options:
+1. **Build torch-XPU from source against Aurora oneAPI 2025.3** (project's original stack route), so
+   torch + source-built kernels share one ABI. Heavy but correct.
+2. Find/install a **torch-XPU wheel built against oneAPI 2025.3** (matching Aurora icpx), then rebuild
+   kernels against it.
+3. **[TRY FIRST — cheapest, most promising]** Install the **oneAPI 2026 DPC++ compiler via pip** to
+   match torch's bundled 2026 runtime, then rebuild kernels WITHOUT the 2025.3 module → one ABI.
+   - Env currently has only runtime `dpcpp-cpp-rt 2026.0.0` (no compiler). Verified: no `icpx` in env.
+   - Try: `pip install dpcpp-cpp-rt==2026.0.0` already present; the compiler pkg is
+     `intel-dpcpp-cpp-compiler` (or `dpcpp_cpp`) — search PyPI/intel channel. If a 2026 `icpx` installs,
+     set `CMAKE_CXX_COMPILER=icpx` from that path, do **not** `module load oneapi`, keep `env/lib`
+     first on `LD_LIBRARY_PATH`, rebuild `build_kernels_pvc.pbs`.
+   - If no pip compiler: fall back to option 1 (build torch-XPU from source with Aurora oneAPI 2025.3).
+
+### New files this update
+- `vllm_bench2.py` now: plain-prompt fallback (no chat template), `VLLM_BENCH_SIMPLE_SCHED` env.
+- `build_kernels_pvc.pbs` — source build (AOT pvc, `-j32`, full log to `.pipfull`, mem_info patch applied).
+- `kernel_probe.pbs` — proves basic ops work on PVC.
+- `models/opt-125m` — tiny model for XPU-path isolation.
+- Env patch #3 note: `oracle/unquantized.py` prefers Triton MoE on XPU (still crashes; keep for BF16).
+
+### vLLM job ledger (append)
+| 8758589 | BF16 TP=4 Triton-MoE | load OK → SIGSEGV forward |
+| 8758626/29/42 | opt-125m TP=1 (triton/flash/simple) | SIGSEGV forward (dense, no MoE) |
+| 8758636 | kernel probe | matmul+silu_and_mul OK |
+| 8758898 | **source kernel build (pvc)** | **BUILD OK** after mem_info patch |
+| 8758912 | MXFP4 TP=2 source kernels | SIGSEGV at engine init (oneAPI ABI split) |
+
+---
+
+**(historical) Last updated:** 2026-08-15 ~15:58 UTC.
 **Author:** Kilo (Claude Opus 4.8)
 **Read this first** to resume without redoing work. Companion docs in this dir:
 `VLLM_INVESTIGATION.md` (root cause), `RESULTS.md` (llama.cpp numbers), `PLAN.md` (E1–E9),
@@ -174,3 +224,22 @@ Two independent blockers remain. Both must be cleared for a working vLLM run.
 - **gpt-oss BF16 (use this for vLLM):** `.../gpt-oss-120b/models/openai-gpt-oss-120b-bf16` (quant=None)
 - Inkling GGUF: `.../inkling/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf`
 - (Optional FP16 mirror not downloaded: `twhitworth/gpt-oss-120b-fp16` via `download_gptoss_bf16_fp16.sh fp16`)
+
+## UPDATE 3 (2026-08-15 23:10) — Path A exhausted; Path B (oneAPI 2026) chosen
+
+- Path A (older vllm + oneAPI 2025.x): **dead end for prebuilt.** vllm XPU wheels only exist for
+  recent versions (0.27.1). vllm 0.11.0/0.11.2 have **no XPU wheel** — pip pulled the PyPI **CUDA**
+  build (`vllm._C` needs libcudart.so.12 → "Device string must not be empty"). Older XPU vllm would
+  require building vllm from source (VLLM_TARGET_DEVICE=xpu), hours. Env `vllm-xpu2` (torch 2.8 + ipex
+  2.8.10 + vllm 0.11.0-CUDA) is not usable; can delete.
+- **Decision: Path B.** Keep working stack = **vllm 0.27.1 + torch 2.13+xpu (env `vllm-xpu`)**. Its
+  only blocker is the forward SIGSEGV, root-caused to the oneAPI ABI split (kernels need 2026 icpx to
+  match torch's bundled 2026 runtime; Aurora only has 2025.3 icpx).
+- **User installing oneAPI 2026.** Once available:
+  1. In `build_kernels_pvc.pbs`: replace `module load oneapi/release/2025.3.1` with the 2026 module
+     (or `source <2026>/setvars.sh`); keep env/lib first on LD_LIBRARY_PATH; keep mem_info patch +
+     AOT pvc. Rebuild vllm_xpu_kernels from source (`build-src/vllm-xpu-kernels`, HEAD 13013c5).
+  2. Run `vllm_run.pbs` (env vllm-xpu) MXFP4 TP=2 4096 → expect no SIGSEGV.
+  3. Then push tok/s >30: TP sweep (2/4/8), fused vs REF MoE, max_num_seqs batching, enable XPU graph
+     (`VLLM_XPU_ENABLE_XPU_GRAPH=1`).
+- Exact need: `icpx` **2026.0.0** (matches `intel-sycl-rt==2026.0.0` in torch 2.13 pins).

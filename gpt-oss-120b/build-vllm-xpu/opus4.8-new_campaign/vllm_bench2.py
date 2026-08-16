@@ -92,7 +92,13 @@ def main():
     _rank = int(os.environ.get("RANK", os.environ.get("PMI_RANK", "0")))
 
     tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    prompt = tok.apply_chat_template(MOF_MSG, tokenize=False, add_generation_prompt=True)
+    try:
+        if getattr(tok, "chat_template", None):
+            prompt = tok.apply_chat_template(MOF_MSG, tokenize=False, add_generation_prompt=True)
+        else:
+            raise ValueError("no chat template")
+    except Exception:
+        prompt = MOF_MSG[0]["content"]
     n_prompt = len(tok.encode(prompt))
     print(f"model={args.model} tp={args.tp} mml={args.max_model_len} "
           f"mem_util={args.gpu_mem_util} mns={args.max_num_seqs} "
@@ -102,6 +108,11 @@ def main():
               trust_remote_code=True, max_model_len=args.max_model_len,
               enforce_eager=args.enforce_eager, gpu_memory_utilization=args.gpu_mem_util,
               max_num_seqs=args.max_num_seqs, disable_log_stats=False)
+    if os.environ.get("VLLM_BENCH_SIMPLE_SCHED") == "1":
+        kw["enable_prefix_caching"] = False
+        kw["enable_chunked_prefill"] = False
+    if os.environ.get("VLLM_BENCH_NO_CUSTOM_OPS") == "1":
+        kw["compilation_config"] = {"custom_ops": ["none"]}
     if args.kv_cache_memory_gib is not None:
         kw["kv_cache_memory_bytes"] = int(args.kv_cache_memory_gib * (1 << 30))
     if args.distributed_executor_backend:
@@ -109,7 +120,13 @@ def main():
     if args.cpu_offload_gb and args.cpu_offload_gb > 0:
         kw["cpu_offload_gb"] = args.cpu_offload_gb
     if args.attention_backend:
-        kw["attention_backend"] = args.attention_backend
+        # vLLM 0.11.x: no attention_backend kwarg; use env. 0.27.x: accepts kwarg.
+        import vllm as _v
+        _ver = tuple(int(x) for x in _v.__version__.split(".")[:2] if x.isdigit())
+        if _ver >= (0, 27):
+            kw["attention_backend"] = args.attention_backend
+        else:
+            os.environ["VLLM_ATTENTION_BACKEND"] = args.attention_backend
 
     t0 = time.perf_counter()
     llm = LLM(**kw)
