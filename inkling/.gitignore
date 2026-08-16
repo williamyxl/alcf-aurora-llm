@@ -46,3 +46,11 @@ build-llamacpp-sycl/*
 !build-llamacpp-sycl-rpc/
 build-llamacpp-sycl-rpc/*
 !build-llamacpp-sycl-rpc/README.md
+
+# vLLM campaign (Inkling): docs + scripts only (no logs)
+!build-vllm/
+build-vllm/*
+!build-vllm/*.md
+!build-vllm/*.pbs
+!build-vllm/*.py
+!build-vllm/*.sh

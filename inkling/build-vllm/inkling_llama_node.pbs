@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ink-node
+#PBS -j oe
+
+# Inkling (UD-IQ1_S GGUF) on ONE Aurora node via llama.cpp SYCL (no RPC).
+# MODE=single  -> single-stream decode (pure-GPU N tiles OR MoE->CPU 1 tile)
+# MODE=conc    -> batched-bench aggregate throughput (pure-GPU N tiles)
+# -v MODE=single|conc  SUB=pg12|mo_hbm  NP=<parallel>  CTX=<ctx>  TILES=<n>
+set -o pipefail
+MODE=${MODE:-single}; SUB=${SUB:-pg12}; NP=${NP:-64}; CTX=${CTX:-4096}; TILES=${TILES:-12}
+PP=${PP:-64}; TG=${TG:-128}; TAG=${TAG:-${MODE}_${SUB}}
+LOG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-vllm/logs/ink_${TAG}.log
+mkdir -p /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-vllm/logs
+exec > "$LOG" 2>&1
+set -x
+echo "START $(date -Is) host=$(hostname) MODE=$MODE SUB=$SUB TILES=$TILES NP=$NP CTX=$CTX"
+
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling
+BIN=$WORKDIR/build-llamacpp-sycl/build/bin
+GGUF=$WORKDIR/models/unsloth-Inkling-GGUF/UD-IQ1_S/inkling-UD-IQ1_S-00001-of-00007.gguf
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu GGML_SYCL_ENABLE_VMM=0
+
+# even tensor-split string for TILES
+mask=$(seq -s, 0 $((TILES-1)))
+split=$(python3 -c "print(','.join(['%.10f'%(1.0/$TILES)]*$TILES))")
+
+if [ "$SUB" = "mo_hbm" ]; then
+  # single-tile MoE->CPU + HBM (F4_hbm analogue)
+  export ZE_AFFINITY_MASK=0
+  COMMON=(-m "$GGUF" -ngl 99 -sm none -fa on -ncmoe 99 -t 32 --numa numactl --no-mmap)
+  PREFIX=(numactl --physcpubind=1-51,105-155 --membind=2)
+else
+  # pure-GPU across TILES
+  export ZE_AFFINITY_MASK=$mask
+  COMMON=(-m "$GGUF" -ngl 99 -sm layer -ts "$split" -fa on --no-mmap)
+  PREFIX=()
+fi
+
+if [ "$MODE" = "conc" ]; then
+  "${PREFIX[@]}" "$BIN/llama-batched-bench" "${COMMON[@]}" -c "$CTX" -npp "$PP" -ntg "$TG" -npl "$NP"
+else
+  "${PREFIX[@]}" "$BIN/llama-completion" "${COMMON[@]}" -c "$CTX" \
+    -p "What is a metal-organic framework (MOF)? Answer in one short paragraph." \
+    -n 128 --seed 42 -no-cnv --single-turn --jinja \
+    --temp 1.0 --top-p 1.0 --top-k 0 --min-p 0.01 --no-display-prompt
+fi
+echo "COMPLETION_EXIT=$? $(date -Is)"
