@@ -7,11 +7,22 @@ reusing the proven gpt-oss-120b vLLM-on-XPU serving kit
 **Read `BEST_RECIPES.md` first** — the two production recipes (high-throughput + single-user).
 Then `FINDINGS.md` for the full outcome, evidence, and both engine paths.
 
-## ⭐ Best recipes (see `BEST_RECIPES.md`)
+This dir now covers **two models**: Nemotron-3-Ultra-550B (MoE) and Nemotron-4-340B (dense).
+
+## ⭐ Best recipes — Nemotron-3-Ultra-550B (MoE; see `BEST_RECIPES.md`)
 | Workload | Recipe | Throughput | Launcher |
 |----------|--------|-----------|----------|
 | **High throughput / concurrency** | **3× `llama-server` full-XPU, 4 tiles each (data parallel) + LB** | **~15.6 tok/s agg, 0.13 req/s** | `serve-llamacpp/dp3_bench_debug.pbs` |
 | **Single user / lowest latency** | **1× `llama-server`, 1 tile, MoE→CPU** | **TTFT ~2.7 s, ~7 tok/s decode** | `serve-llamacpp/serve_test_debug.pbs` |
+
+## ⭐ Best recipes — Nemotron-4-340B (dense; see `BEST_RECIPES_N4.md`)
+| Workload | Recipe | Throughput | Launcher |
+|----------|--------|-----------|----------|
+| **High throughput / concurrency** | **3× `llama-server` full-XPU, 4 tiles each (data parallel) + LB** | **~9.9 tok/s agg, 0.077 req/s** | `serve-llamacpp-n4/dp_bench_debug.pbs` |
+| **Single user / lowest latency** | **1× `llama-server` full-XPU, 6 tiles** | **TTFT ~2.4 s, ~11 prefill / ~2.3 decode tok/s** | `serve-llamacpp-n4/single_bench_debug.pbs` |
+
+Nemotron-4-340B is a **dense** 340B (no MoE → no CPU-expert offload; single-tile impossible). Checkpoint:
+`models/gguf-n4/` (i1-Q4_K_M, ~196 GB; download via `download_nemotron4_gguf.sh`).
 
 > **Outcome (2026-08-19): ✅ WORKING via llama.cpp SYCL.**
 > - **llama.cpp SYCL `llama-server`** serves Nemotron-3-Ultra (`nemotron_h_moe`) on **one Aurora tile**

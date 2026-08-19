@@ -1,0 +1,110 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N n4-dp
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp-n4/logs/dp.out
+
+# Nemotron-4-340B (DENSE) — HIGH CONCURRENCY via data parallelism: NREP independent llama-server
+# instances on disjoint tile groups (TPE tiles each), each FULL-XPU (dense -> weights on GPU), driven
+# concurrently; sum node aggregate. Dense model has no MoE->CPU path, so instances are self-contained
+# in HBM and should scale (like the Nemotron-3-Ultra 3x DP result).
+#
+# HBM (~64 GB/tile), i1-Q4_K_M ~210 GB/instance:
+#   2 inst x 6 tiles = ~35 GB/tile (SAFE, default) ; 3 inst x 4 tiles = ~52 GB/tile (TIGHT).
+#
+#   qsub -q debug nemotron/serve-llamacpp-n4/dp_bench_debug.pbs
+#   qsub -q debug -v NREP=2,TPE=6,QUANT=i1-Q4_K_M,CTX=4096,NPAR=8,MAXTOK=128,LEVELS="1 4 8" ...
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp-n4
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-i1-Q4_K_M}
+GGUF=${GGUF:-$NEMO/models/gguf-n4/nemotron4-340b-${QUANT}.gguf}
+NREP=${NREP:-2}; TPE=${TPE:-6}; CTX=${CTX:-4096}; NPAR=${NPAR:-8}; NThreads=${NThreads:-16}
+BASE_PORT=${BASE_PORT:-8001}; SERVED=${SERVED:-nemotron-4-340b}
+MAXTOK=${MAXTOK:-128}; LEVELS=${LEVELS:-1 4 8}; SPLIT=${SPLIT:-layer}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) N4 DATA-PARALLEL NREP=$NREP TPE=$TPE (tiles=$((NREP*TPE))) QUANT=$QUANT CTX=$CTX NPAR=$NPAR"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF)"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+export GGML_SYCL_ENABLE_VMM=0
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+
+pids=(); ports=()
+for r in $(seq 0 $((NREP-1))); do
+  lo=$((r*TPE)); mask=""
+  for t in $(seq 0 $((TPE-1))); do mask="$mask,$((lo+t))"; done; mask=${mask#,}
+  port=$((BASE_PORT + r)); ports+=("$port")
+  (
+    export ZE_AFFINITY_MASK=$mask
+    echo "[inst $r] tiles=$mask port=$port"
+    numactl --interleave=all \
+      "$BIN/llama-server" \
+      -m "$GGUF" \
+      -c "$CTX" -ngl 99 --split-mode "$SPLIT" \
+      -fa on -t "$NThreads" --no-mmap \
+      --parallel "$NPAR" --cont-batching --jinja \
+      --alias "$SERVED" \
+      --host 127.0.0.1 --port "$port" > "$SERVE/logs/dp_inst${r}.out" 2>&1
+  ) &
+  pids+=($!)
+  sleep 25
+done
+
+for port in "${ports[@]}"; do
+  ok=0
+  for _ in $(seq 1 200); do
+    curl -sf "http://127.0.0.1:$port/health" >/dev/null 2>&1 && { ok=1; echo "inst :$port ready $(date -Is)"; break; }
+    sleep 10
+  done
+  [ "$ok" = 1 ] || { echo "INSTANCE :$port NOT READY"; tail -40 "$SERVE/logs/dp_inst$((port-BASE_PORT)).out"; }
+done
+
+echo "=== N4 DP BENCH: driving all $NREP instances concurrently ==="
+bpids=()
+for r in $(seq 0 $((NREP-1))); do
+  port=$((BASE_PORT + r))
+  "$FWPY" "$NEMO/serve-llamacpp/bench_client.py" --url "http://127.0.0.1:$port/v1" --model "$SERVED" \
+    --max-tokens "$MAXTOK" --concurrency $LEVELS > "$SERVE/logs/dp_bench${r}.out" 2>&1 &
+  bpids+=($!)
+done
+for p in "${bpids[@]}"; do wait "$p"; done
+
+echo "=== NODE AGGREGATE (sum over instances, per concurrency level) ==="
+"$FWPY" - "$SERVE" "$NREP" "$LEVELS" <<'PY'
+import sys, json
+serve, nrep, levels = sys.argv[1], int(sys.argv[2]), sys.argv[3].split()
+rows = {}
+for r in range(nrep):
+    try:
+        for line in open(f"{serve}/logs/dp_bench{r}.out", errors="ignore"):
+            if line.startswith("BENCH_JSON="):
+                for d in json.loads(line.split("=",1)[1]):
+                    c=d.get("concurrency")
+                    if c is None or "error" in d: continue
+                    a=rows.setdefault(c,{"agg_gen_tps":0.0,"req_per_s":0.0,"insts":0,"ttft":[]})
+                    a["agg_gen_tps"]+=d.get("agg_gen_tps") or 0
+                    a["req_per_s"]+=d.get("req_per_s") or 0
+                    if d.get("ttft_ms_p50"): a["ttft"].append(d["ttft_ms_p50"])
+                    a["insts"]+=1
+    except FileNotFoundError:
+        print(f"  (missing dp_bench{r}.out)")
+for c in sorted(rows):
+    a=rows[c]; ttft=round(sum(a["ttft"])/len(a["ttft"]),1) if a["ttft"] else None
+    print(f"  per_inst_c={c:<3} insts={a['insts']}  NODE_agg_gen={a['agg_gen_tps']:.1f} tok/s  "
+          f"NODE_req/s={a['req_per_s']:.3f}  mean_TTFT_p50={ttft} ms")
+print("DP_NODE_JSON="+json.dumps({str(c):rows[c] for c in sorted(rows)},default=list,separators=(",",":")))
+PY
+
+echo "=== shutting down ==="
+for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+echo "DONE $(date -Is)"

@@ -181,3 +181,17 @@ nemotron/serve/*
 nemotron/serve/logs/
 !nemotron/serve/lb.py
 !nemotron/serve/client_example.py
+
+# ---- nemotron: Nemotron-4-340B (dense) recipes ----
+# docs
+!nemotron/BEST_RECIPES_N4.md
+
+# GGUF download (multipart streaming assemble)
+!nemotron/download_nemotron4_gguf.sh
+
+# llama.cpp serving kit for Nemotron-4-340B (single-serve + data-parallel)
+!nemotron/serve-llamacpp-n4/
+nemotron/serve-llamacpp-n4/*
+nemotron/serve-llamacpp-n4/logs/
+!nemotron/serve-llamacpp-n4/single_bench_debug.pbs
+!nemotron/serve-llamacpp-n4/dp_bench_debug.pbs

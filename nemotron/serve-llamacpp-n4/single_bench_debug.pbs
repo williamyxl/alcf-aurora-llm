@@ -1,0 +1,79 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N n4-single
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp-n4/logs/single.out
+
+# Nemotron-4-340B (DENSE nemotron arch) — SINGLE-SERVE, full-XPU on the fewest tiles that fit.
+# Dense model: NO MoE, so no CPU-expert offload — all weights on GPU (or host). Full-XPU across
+# NTILES tiles (layer split), lowest-latency single-user endpoint. Then bench TTFT / prefill / decode.
+#
+# HBM (~64 GB/tile): i1-Q4_K_M ~210 GB -> >=4 tiles (~52 GB/tile, tight); safe at 6 (~35) / 8 (~26).
+# Default NTILES=6.
+#
+#   qsub -q debug nemotron/serve-llamacpp-n4/single_bench_debug.pbs
+#   qsub -q debug -v QUANT=i1-Q4_K_M,NTILES=6,CTX=4096,NPAR=1,MAXTOK=128,LEVELS="1" ...
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp-n4
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-i1-Q4_K_M}
+GGUF=${GGUF:-$NEMO/models/gguf-n4/nemotron4-340b-${QUANT}.gguf}
+NTILES=${NTILES:-6}; CTX=${CTX:-4096}; NPAR=${NPAR:-1}; NThreads=${NThreads:-64}
+PORT=${PORT:-8000}; SERVED=${SERVED:-nemotron-4-340b}
+MAXTOK=${MAXTOK:-128}; LEVELS=${LEVELS:-1 4 8}; SPLIT=${SPLIT:-layer}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) N4 SINGLE-SERVE full-XPU QUANT=$QUANT NTILES=$NTILES SPLIT=$SPLIT CTX=$CTX NPAR=$NPAR"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF); run download_nemotron4_gguf.sh"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+MASK=$(seq -s, 0 $((NTILES-1)))
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=$MASK
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+export GGML_SYCL_ENABLE_VMM=0
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+echo "ZE_AFFINITY_MASK=$ZE_AFFINITY_MASK"
+
+numactl --interleave=all \
+  "$BIN/llama-server" \
+  -m "$GGUF" \
+  -c "$CTX" -ngl 99 --split-mode "$SPLIT" \
+  -fa on -t "$NThreads" --no-mmap \
+  --parallel "$NPAR" --cont-batching --jinja \
+  --alias "$SERVED" \
+  --host 127.0.0.1 --port "$PORT" > "$SERVE/logs/single_server.out" 2>&1 &
+SRV_PID=$!
+
+READY=0
+for _ in $(seq 1 200); do
+  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { READY=1; echo "server ready $(date -Is)"; break; }
+  kill -0 "$SRV_PID" 2>/dev/null || { echo "SERVER DIED; tail:"; tail -60 "$SERVE/logs/single_server.out"; break; }
+  sleep 10
+done
+if [ "$READY" != 1 ]; then echo "SERVER NOT READY"; tail -80 "$SERVE/logs/single_server.out"; kill "$SRV_PID" 2>/dev/null; exit 4; fi
+
+# publish endpoint
+NODE_IP=$(hostname -i | awk '{print $1}')
+cat > "$SERVE/ENDPOINT.txt" <<EOF
+node=$(hostname)
+ip=$NODE_IP
+url=http://$NODE_IP:$PORT/v1
+model=$SERVED
+job=$PBS_JOBID
+started=$(date -Is)
+EOF
+
+echo "=== N4 SINGLE-SERVE BENCH (TTFT / prefill / decode + concurrency sweep) ==="
+"$FWPY" "$NEMO/serve-llamacpp/bench_client.py" --url "http://127.0.0.1:$PORT/v1" --model "$SERVED" \
+  --max-tokens "$MAXTOK" --warmup --concurrency $LEVELS
+
+echo "=== shutting down ==="
+kill "$SRV_PID" 2>/dev/null
+echo "DONE $(date -Is)"
