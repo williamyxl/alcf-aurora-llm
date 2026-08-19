@@ -1,0 +1,72 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N nemo-ll-fullxpu
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp/logs/fullxpu.out
+
+# FULL-XPU inference (NO CPU offload): keep the MoE experts on GPU by dropping -ncmoe and
+# spreading the whole model across NTILES tiles of one Aurora node (layer split). Then bench
+# single-stream + concurrency sweep against the same llama-server, to compare vs the MoE->CPU recipe.
+#
+# HBM budget (~64 GB/tile): UD-IQ2_M 194 GB needs >=4 tiles (safe 6-8); MXFP4_MOE 352 GB needs >=6
+# (safe 8+). Default NTILES=8, QUANT=UD-IQ2_M.
+#
+#   qsub -q debug nemotron/serve-llamacpp/full_xpu_bench_debug.pbs
+#   qsub -q debug -v QUANT=UD-IQ2_M,NTILES=8,CTX=16384,NPAR=32,MAXTOK=128,LEVELS="1 4 8 16 32" ...
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-UD-IQ2_M}
+GGUF=${GGUF:-$(ls "$NEMO/models/gguf/$QUANT"/*-00001-of-*.gguf 2>/dev/null | head -1)}
+NTILES=${NTILES:-8}; CTX=${CTX:-16384}; NPAR=${NPAR:-32}; NThreads=${NThreads:-64}
+PORT=${PORT:-8000}; SERVED=${SERVED:-nemotron-3-ultra}
+MAXTOK=${MAXTOK:-128}; LEVELS=${LEVELS:-1 4 8 16 32}; SPLIT=${SPLIT:-layer}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) FULL-XPU (no -ncmoe) QUANT=$QUANT NTILES=$NTILES SPLIT=$SPLIT CTX=$CTX NPAR=$NPAR"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF)"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+# Expose NTILES tiles of the node as separate SYCL devices (FLAT hierarchy).
+MASK=$(seq -s, 0 $((NTILES-1)))
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=$MASK
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZES_ENABLE_SYSMAN=1
+export GGML_SYCL_ENABLE_VMM=0        # required on PVC: default VMM=1 OOMs at warmup
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+echo "ZE_AFFINITY_MASK=$ZE_AFFINITY_MASK"
+"$BIN/llama-ls-sycl-device" 2>&1 | head -40
+
+# Full-GPU server: all layers on GPU (-ngl 99), experts ON GPU (NO -ncmoe), layer-split across tiles.
+"$BIN/llama-server" \
+  -m "$GGUF" \
+  -c "$CTX" -ngl 99 --split-mode "$SPLIT" \
+  -fa on -t "$NThreads" --no-mmap \
+  --parallel "$NPAR" --cont-batching --jinja \
+  --alias "$SERVED" \
+  --host 127.0.0.1 --port "$PORT" > "$SERVE/logs/fullxpu_server.out" 2>&1 &
+SRV_PID=$!
+
+READY=0
+for _ in $(seq 1 200); do
+  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { READY=1; echo "server ready $(date -Is)"; break; }
+  kill -0 "$SRV_PID" 2>/dev/null || { echo "SERVER DIED; tail:"; tail -60 "$SERVE/logs/fullxpu_server.out"; break; }
+  sleep 10
+done
+if [ "$READY" != 1 ]; then echo "SERVER NOT READY"; tail -80 "$SERVE/logs/fullxpu_server.out"; kill "$SRV_PID" 2>/dev/null; exit 4; fi
+
+echo "=== FULL-XPU BENCH (single-stream + concurrency sweep) ==="
+"$FWPY" "$SERVE/bench_client.py" --url "http://127.0.0.1:$PORT/v1" --model "$SERVED" \
+  --max-tokens "$MAXTOK" --warmup --concurrency $LEVELS
+
+echo "=== shutting down ==="
+kill "$SRV_PID" 2>/dev/null
+echo "DONE $(date -Is)"

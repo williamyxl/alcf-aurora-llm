@@ -1,0 +1,81 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N nemo-ll-serve
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp/logs/serve_test.out
+
+# DEBUG-QUEUE validation of Nemotron-3-Ultra served by llama.cpp SYCL `llama-server`
+# (OpenAI-compatible /v1) on ONE Aurora tile. MoE experts -> CPU (-ncmoe 99), F4_hbm-style.
+# Waits for /health, writes ENDPOINT.txt, runs a self-smoke via curl, then exits.
+# For long hosting: raise walltime and switch -q capacity (keep it running; drop the self-exit).
+#
+#   qsub -q debug nemotron/serve-llamacpp/serve_test_debug.pbs
+#   qsub -q debug -v CTX=8192,NPAR=4,PORT=8000 nemotron/serve-llamacpp/serve_test_debug.pbs
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-UD-IQ2_M}
+# Real first shard (-00001-of-*); llama.cpp auto-loads the rest and rejects a symlinked name.
+GGUF=${GGUF:-$(ls "$NEMO/models/gguf/$QUANT"/*-00001-of-*.gguf 2>/dev/null | head -1)}
+CTX=${CTX:-4096}; NPAR=${NPAR:-1}; NThreads=${NThreads:-64}
+PORT=${PORT:-8000}; SERVED=${SERVED:-nemotron-3-ultra}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) GGUF=$GGUF CTX=$CTX NPAR=$NPAR"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF); run download_nemotron_gguf.sh"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export GGML_SYCL_ENABLE_VMM=0
+
+NODE_IP=$(hostname -i | awk '{print $1}'); NODE=$(hostname)
+
+# Launch llama-server (single tile, MoE->CPU). Sequential load (--no-mmap) into interleaved DDR;
+# binds all interfaces for intra-cluster access.
+numactl --interleave=all \
+  "$BIN/llama-server" \
+  -m "$GGUF" \
+  -c "$CTX" -ngl 99 -sm none \
+  -fa on -ncmoe 99 -t "$NThreads" --numa numactl --no-mmap \
+  --parallel "$NPAR" --cont-batching --jinja \
+  --alias "$SERVED" \
+  --host 0.0.0.0 --port "$PORT" > "$SERVE/logs/llama_server.out" 2>&1 &
+SRV_PID=$!
+
+# Wait for readiness (GGUF load can take a few minutes off Lustre with)
+READY=0
+for _ in $(seq 1 120); do
+  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { READY=1; echo "server ready"; break; }
+  kill -0 "$SRV_PID" 2>/dev/null || { echo "SERVER DIED before ready; tail:"; tail -40 "$SERVE/logs/llama_server.out"; break; }
+  sleep 10
+done
+if [ "$READY" != 1 ]; then echo "SERVER NOT READY"; tail -60 "$SERVE/logs/llama_server.out" 2>/dev/null; kill "$SRV_PID" 2>/dev/null; exit 4; fi
+
+cat > "$SERVE/ENDPOINT.txt" <<EOF
+node=$NODE
+ip=$NODE_IP
+url=http://$NODE_IP:$PORT/v1
+model=$SERVED
+job=$PBS_JOBID
+started=$(date -Is)
+EOF
+echo "ENDPOINT: http://$NODE_IP:$PORT/v1  (see $SERVE/ENDPOINT.txt)"
+
+echo "=== SMOKE: /v1/models ==="
+curl -s "http://127.0.0.1:$PORT/v1/models"; echo
+echo "=== SMOKE: /v1/chat/completions ==="
+curl -s "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$SERVED\",\"messages\":[{\"role\":\"user\",\"content\":\"In two sentences, what is a metal-organic framework?\"}],\"max_tokens\":128,\"temperature\":0.0}"
+echo
+echo "=== serve test complete; shutting down ==="
+kill "$SRV_PID" 2>/dev/null
+echo "DONE $(date -Is)"

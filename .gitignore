@@ -143,3 +143,41 @@ inkling/build-llamacpp-sycl/*
 !inkling/build-llamacpp-sycl-rpc/
 inkling/build-llamacpp-sycl-rpc/*
 !inkling/build-llamacpp-sycl-rpc/README.md
+
+# ---- nemotron (Nemotron-3-Ultra-550B-A55B inference) ----
+!nemotron/
+nemotron/*
+nemotron/models/
+nemotron/logs/
+nemotron/.cache/
+nemotron/__pycache__/
+
+# docs (recipes + findings)
+!nemotron/README.md
+!nemotron/BEST_RECIPES.md
+!nemotron/FINDINGS.md
+!nemotron/PLAN.md
+
+# GGUF download for llama.cpp recipes
+!nemotron/download_nemotron_gguf.sh
+
+# single-serve recipe (1 tile, MoE->CPU): smoke + server
+!nemotron/llama_smoke.pbs
+
+# llama.cpp serving kit (single-serve + high-concurrency data-parallel)
+!nemotron/serve-llamacpp/
+nemotron/serve-llamacpp/*
+nemotron/serve-llamacpp/logs/
+!nemotron/serve-llamacpp/README.md
+!nemotron/serve-llamacpp/serve_test_debug.pbs
+!nemotron/serve-llamacpp/dp3_bench_debug.pbs
+!nemotron/serve-llamacpp/full_xpu_bench_debug.pbs
+!nemotron/serve-llamacpp/bench_debug.pbs
+!nemotron/serve-llamacpp/bench_client.py
+
+# shared load balancer + client for the data-parallel endpoint
+!nemotron/serve/
+nemotron/serve/*
+nemotron/serve/logs/
+!nemotron/serve/lb.py
+!nemotron/serve/client_example.py

@@ -1,0 +1,64 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N nemo-ll-bench
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp/logs/bench.out
+
+# Benchmark Nemotron-3-Ultra on llama.cpp SYCL `llama-server` (single tile, MoE->CPU):
+# load the server ONCE, then measure TTFT / prefill TPS / decode TPS at concurrency=1 and sweep
+# concurrency (1 4 8 16 32) against the same server. Single debug job (<=1 h).
+#
+#   qsub -q debug nemotron/serve-llamacpp/bench_debug.pbs
+#   qsub -q debug -v QUANT=UD-IQ2_M,CTX=8192,NPAR=32,MAXTOK=128,LEVELS="1 4 8 16 32" ...
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-UD-IQ2_M}
+GGUF=${GGUF:-$(ls "$NEMO/models/gguf/$QUANT"/*-00001-of-*.gguf 2>/dev/null | head -1)}
+CTX=${CTX:-8192}; NPAR=${NPAR:-32}; NThreads=${NThreads:-64}
+PORT=${PORT:-8000}; SERVED=${SERVED:-nemotron-3-ultra}
+MAXTOK=${MAXTOK:-128}; LEVELS=${LEVELS:-1 4 8 16 32}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) QUANT=$QUANT CTX=$CTX NPAR=$NPAR MAXTOK=$MAXTOK LEVELS=[$LEVELS]"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF)"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export GGML_SYCL_ENABLE_VMM=0
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python  # stdlib-only client
+
+# Server: one tile, MoE->CPU, sequential load, continuous batching with NPAR slots.
+# Note: with --parallel N, the KV context is split across slots => effective per-slot ctx = CTX/N.
+numactl --interleave=all \
+  "$BIN/llama-server" \
+  -m "$GGUF" \
+  -c "$CTX" -ngl 99 -sm none \
+  -fa on -ncmoe 99 -t "$NThreads" --numa numactl --no-mmap \
+  --parallel "$NPAR" --cont-batching --jinja \
+  --alias "$SERVED" \
+  --host 127.0.0.1 --port "$PORT" > "$SERVE/logs/bench_server.out" 2>&1 &
+SRV_PID=$!
+
+READY=0
+for _ in $(seq 1 150); do
+  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { READY=1; echo "server ready $(date -Is)"; break; }
+  kill -0 "$SRV_PID" 2>/dev/null || { echo "SERVER DIED; tail:"; tail -40 "$SERVE/logs/bench_server.out"; break; }
+  sleep 10
+done
+if [ "$READY" != 1 ]; then echo "SERVER NOT READY"; tail -60 "$SERVE/logs/bench_server.out"; kill "$SRV_PID" 2>/dev/null; exit 4; fi
+
+echo "=== BENCH (single-stream + concurrency sweep) ==="
+"$FWPY" "$SERVE/bench_client.py" --url "http://127.0.0.1:$PORT/v1" --model "$SERVED" \
+  --max-tokens "$MAXTOK" --warmup --concurrency $LEVELS
+
+echo "=== shutting down ==="
+kill "$SRV_PID" 2>/dev/null
+echo "DONE $(date -Is)"

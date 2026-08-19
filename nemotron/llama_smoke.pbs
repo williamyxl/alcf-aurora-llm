@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N nemo-ll-smoke
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/logs/llama_smoke.out
+
+# llama.cpp SYCL smoke for Nemotron-3-Ultra (nemotron_h_moe) on ONE Aurora tile.
+# F4_hbm-style: MoE experts -> CPU (-ncmoe 99); dense/attn/Mamba on GPU tile 0; flash-attention on.
+#
+# Loading strategy: --no-mmap so weights stream once sequentially into host RAM (node has ~1 TB),
+# which is far faster off Lustre than mmap page-fault random reads for a first cold run. Memory is
+# bound across all NUMA nodes (model > single HBM node). Default quant UD-IQ2_M (~194 GB) to fit a
+# load+generate cycle inside the debug 1 h walltime; use QUANT=MXFP4_MOE for the higher-quality run.
+#
+#   qsub -q debug nemotron/llama_smoke.pbs
+#   qsub -q debug -v QUANT=MXFP4_MOE,CTX=4096,NGEN=64 nemotron/llama_smoke.pbs
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-UD-IQ2_M}
+# Real first shard (-00001-of-*); llama.cpp derives the rest and rejects a renamed/symlinked path.
+GGUF=${GGUF:-$(ls "$NEMO/models/gguf/$QUANT"/*-00001-of-*.gguf 2>/dev/null | head -1)}
+CTX=${CTX:-4096}; NGEN=${NGEN:-64}; NThreads=${NThreads:-64}
+mkdir -p "$NEMO/logs"
+
+echo "START $(date -Is) host=$(hostname) QUANT=$QUANT CTX=$CTX NGEN=$NGEN GGUF=$GGUF"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF); run download_nemotron_gguf.sh (QUANT=$QUANT)"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export GGML_SYCL_ENABLE_VMM=0
+
+ls -lh "$BIN/llama-cli" "$GGUF" 2>/dev/null
+"$BIN/llama-ls-sycl-device" 2>/dev/null | head
+
+# 1 tile; MoE experts on CPU (-ncmoe 99); sequential load (--no-mmap); interleaved DDR; fa on.
+numactl --interleave=all \
+  "$BIN/llama-cli" \
+  -m "$GGUF" \
+  -p "What is a metal-organic framework (MOF)? Answer in one short paragraph." \
+  -n "$NGEN" -c "$CTX" -ngl 99 -sm none \
+  --seed 42 -no-cnv --single-turn --no-warmup \
+  --no-display-prompt --no-mmap \
+  -fa on -ncmoe 99 -t "$NThreads" --numa numactl
+echo "SMOKE_EXIT=$?"
+echo "DONE $(date -Is)"

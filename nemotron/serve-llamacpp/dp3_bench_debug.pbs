@@ -1,0 +1,121 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N nemo-ll-dp
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron/serve-llamacpp/logs/dp3.out
+
+# DATA-PARALLEL node throughput: launch NREP independent llama-server instances on one Aurora node,
+# each on a disjoint group of TPE tiles, then drive all of them concurrently and sum aggregate gen tok/s.
+# Mirrors the gpt-oss 3x TP=4 data-parallel node recipe, adapted to llama.cpp.
+#
+# Default: 3 instances x 4 tiles = 12 tiles, UD-IQ2_M, FULL-XPU per instance (experts on GPU, no -ncmoe)
+# so instances don't contend for CPU/DDR. (UD-IQ2_M ~48.5 GB/tile at 4 tiles fits ~64 GB HBM.)
+# Set MODE=offload to instead run each instance MoE->CPU (shares CPU/DDR across instances).
+#
+#   qsub -q debug nemotron/serve-llamacpp/dp3_bench_debug.pbs
+#   qsub -q debug -v NREP=3,TPE=4,MODE=fullxpu,QUANT=UD-IQ2_M,CTX=8192,NPAR=16,MAXTOK=128,LEVELS="1 4 8" ...
+
+set -o pipefail
+NEMO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/nemotron
+SERVE=$NEMO/serve-llamacpp
+BIN=${BIN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/inkling/build-llamacpp-sycl/build/bin}
+QUANT=${QUANT:-UD-IQ2_M}
+GGUF=${GGUF:-$(ls "$NEMO/models/gguf/$QUANT"/*-00001-of-*.gguf 2>/dev/null | head -1)}
+NREP=${NREP:-3}; TPE=${TPE:-4}; MODE=${MODE:-fullxpu}
+CTX=${CTX:-8192}; NPAR=${NPAR:-16}; NThreads=${NThreads:-16}
+BASE_PORT=${BASE_PORT:-8001}; SERVED=${SERVED:-nemotron-3-ultra}
+MAXTOK=${MAXTOK:-128}; LEVELS=${LEVELS:-1 4 8}
+mkdir -p "$SERVE/logs"
+
+echo "START $(date -Is) host=$(hostname) DATA-PARALLEL NREP=$NREP TPE=$TPE (tiles=$((NREP*TPE))) MODE=$MODE QUANT=$QUANT CTX=$CTX NPAR=$NPAR"
+if [ ! -e "$GGUF" ]; then echo "ERROR: GGUF not found ($GGUF)"; exit 2; fi
+
+module load oneapi/release/2025.3.1
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZES_ENABLE_SYSMAN=1
+export GGML_SYCL_ENABLE_VMM=0
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+
+# MoE flag per mode
+MOEFLAG=""; [ "$MODE" = "offload" ] && MOEFLAG="-ncmoe 99"
+SPLIT=layer   # within an instance, spread its TPE tiles by layer
+
+pids=(); ports=()
+for r in $(seq 0 $((NREP-1))); do
+  lo=$((r*TPE)); mask=""
+  for t in $(seq 0 $((TPE-1))); do mask="$mask,$((lo+t))"; done; mask=${mask#,}
+  port=$((BASE_PORT + r)); ports+=("$port")
+  (
+    export ZE_AFFINITY_MASK=$mask
+    echo "[inst $r] tiles=$mask port=$port mode=$MODE"
+    numactl --interleave=all \
+      "$BIN/llama-server" \
+      -m "$GGUF" \
+      -c "$CTX" -ngl 99 --split-mode "$SPLIT" \
+      -fa on -t "$NThreads" --no-mmap $MOEFLAG \
+      --parallel "$NPAR" --cont-batching --jinja \
+      --alias "$SERVED" \
+      --host 127.0.0.1 --port "$port" > "$SERVE/logs/dp3_inst${r}.out" 2>&1
+  ) &
+  pids+=($!)
+  sleep 20   # stagger startup
+done
+
+# Wait for all instances healthy
+for port in "${ports[@]}"; do
+  ok=0
+  for _ in $(seq 1 180); do
+    curl -sf "http://127.0.0.1:$port/health" >/dev/null 2>&1 && { ok=1; echo "inst on :$port ready $(date -Is)"; break; }
+    sleep 10
+  done
+  [ "$ok" = 1 ] || { echo "INSTANCE :$port NOT READY"; tail -40 "$SERVE/logs/dp3_inst$((port-BASE_PORT)).out"; }
+done
+
+# Per-instance bench (concurrency sweep) run in parallel across all instances; then sum aggregate.
+echo "=== DP BENCH: driving all $NREP instances concurrently ==="
+bpids=()
+for r in $(seq 0 $((NREP-1))); do
+  port=$((BASE_PORT + r))
+  "$FWPY" "$SERVE/bench_client.py" --url "http://127.0.0.1:$port/v1" --model "$SERVED" \
+    --max-tokens "$MAXTOK" --concurrency $LEVELS > "$SERVE/logs/dp3_bench${r}.out" 2>&1 &
+  bpids+=($!)
+done
+for p in "${bpids[@]}"; do wait "$p"; done
+
+echo "=== NODE AGGREGATE (sum over instances, per concurrency level) ==="
+"$FWPY" - "$SERVE" "$NREP" "$LEVELS" <<'PY'
+import sys, glob, json
+serve, nrep, levels = sys.argv[1], int(sys.argv[2]), sys.argv[3].split()
+rows = {}
+for r in range(nrep):
+    f = f"{serve}/logs/dp3_bench{r}.out"
+    try:
+        for line in open(f, errors="ignore"):
+            if line.startswith("BENCH_JSON="):
+                data = json.loads(line.split("=",1)[1])
+                for d in data:
+                    c = d.get("concurrency")
+                    if c is None or "error" in d: continue
+                    a = rows.setdefault(c, {"agg_gen_tps":0.0,"req_per_s":0.0,"insts":0,"ttft_p50":[]})
+                    a["agg_gen_tps"] += d.get("agg_gen_tps") or 0
+                    a["req_per_s"]   += d.get("req_per_s") or 0
+                    if d.get("ttft_ms_p50"): a["ttft_p50"].append(d["ttft_ms_p50"])
+                    a["insts"] += 1
+    except FileNotFoundError:
+        print(f"  (missing {f})")
+print(f"per-instance concurrency levels: {levels}; NREP={nrep}")
+for c in sorted(rows):
+    a = rows[c]
+    ttft = round(sum(a["ttft_p50"])/len(a["ttft_p50"]),1) if a["ttft_p50"] else None
+    print(f"  per_inst_c={c:<3} insts={a['insts']}  NODE_agg_gen={a['agg_gen_tps']:.1f} tok/s  "
+          f"NODE_req/s={a['req_per_s']:.3f}  mean_TTFT_p50={ttft} ms")
+print("DP_NODE_JSON=" + json.dumps({str(c): rows[c] for c in sorted(rows)}, default=list, separators=(",",":")))
+PY
+
+echo "=== shutting down ==="
+for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+echo "DONE $(date -Is)"
