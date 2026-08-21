@@ -1,0 +1,142 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=24:00:00
+#PBS -q capacity
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-api
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/api_serve_high_concurrency/logs/serve.out
+
+# gpt-oss-120b high-concurrency API serving on ONE Aurora node (capacity queue, 24 h).
+# Recipe: 3 x vLLM serve (TP=4, disjoint tile groups 0-3 / 4-7 / 8-11) + round-robin LB.
+# Validated peak throughput: ~4565 tok/s aggregate, ~36 req/s at MNS=128.
+#
+# The LB binds all interfaces; the node IP is intra-cluster only (no public IP on compute nodes).
+# To reach the endpoint externally, run the UAN tunnel script on a login node — see README.md.
+#
+# Submit:
+#   qsub api_serve_high_concurrency/serve_gptoss_capacity.pbs
+#   qsub -v MNS=64,KVGIB=16 api_serve_high_concurrency/serve_gptoss_capacity.pbs
+#
+# Stop early:
+#   touch api_serve_high_concurrency/STOP     # graceful shutdown
+
+set -o pipefail
+
+WORKDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/api_serve_high_concurrency
+GPTOSS=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/gpt-oss-120b
+MODEL=${MODEL:-$GPTOSS/models/openai-gpt-oss-120b}
+
+# ── serving parameters (override with qsub -v) ──────────────────────────────
+NREP=${NREP:-3}           # number of engines (3 x TP=4 = 12 tiles)
+TPE=${TPE:-4}             # tiles per engine
+MML=${MML:-131072}        # gpt-oss-120b native max context
+MNS=${MNS:-128}           # max concurrent sequences per engine (128 = best measured)
+MEMUTIL=${MEMUTIL:-0.85}
+KVGIB=${KVGIB:-40}        # KV cache pool per engine (GiB); scale with MML
+LB_PORT=${LB_PORT:-8000}  # the single external-facing port
+BASE_PORT=${BASE_PORT:-8001}
+SERVED_NAME=${SERVED_NAME:-gpt-oss-120b}
+
+mkdir -p "$WORKDIR/logs"
+
+# ── vLLM stack (must run under the full frameworks module env) ───────────────
+module use /opt/aurora/26.26.0/frameworks/modulefiles
+module load frameworks
+FWPY=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/python
+VLLM=/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/bin/vllm
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp VLLM_XPU_FUSED_MOE_USE_REF=1
+
+# gpt-oss uses openai_harmony for tool-calling; its o200k tiktoken vocab must be cached
+# (pre-cached on a login node via download_tiktoken_cache.sh; see README.md).
+export TIKTOKEN_RS_CACHE_DIR=${TIKTOKEN_RS_CACHE_DIR:-$GPTOSS/.tiktoken_cache}
+[ -d "$TIKTOKEN_RS_CACHE_DIR" ] || { echo "WARN: TIKTOKEN_RS_CACHE_DIR not found — run download_tiktoken_cache.sh first"; }
+
+# Honor STOP file in case a previous run left one.
+if [ -f "$WORKDIR/STOP" ]; then
+  echo "$(date -Is) STOP file present; exiting (remove it before resubmitting)"; exit 0
+fi
+
+NODE_IP=$(hostname -i | awk '{print $1}'); NODE=$(hostname)
+echo "$(date -Is) host=$NODE ip=$NODE_IP job=$PBS_JOBID"
+echo "NREP=$NREP TPE=$TPE MML=$MML MNS=$MNS KVGIB=$KVGIB LB_PORT=$LB_PORT"
+[ -e "$MODEL/config.json" ] || { echo "ERROR: model not found at $MODEL"; exit 2; }
+
+# ── launch 3 vLLM engines on disjoint tile groups ───────────────────────────
+pids=(); backends=()
+for r in $(seq 0 $((NREP-1))); do
+  lo=$((r*TPE)); mask=""
+  for t in $(seq 0 $((TPE-1))); do mask="$mask,$((lo+t))"; done; mask=${mask#,}
+  port=$((BASE_PORT + r))
+  backends+=("http://127.0.0.1:$port")
+  JT=${PBS_JOBID}_r${r}
+  (
+    # Match the validated 4565 tok/s DP recipe (vllm_dp_node.pbs): set ONLY ZE_AFFINITY_MASK per
+    # engine. Do NOT set ONEAPI_DEVICE_SELECTOR or ZE_FLAT_DEVICE_HIERARCHY — forcing them conflicts
+    # with the IPEX Marlin JIT and causes "No device of requested type available" in the profiling forward.
+    export ZE_AFFINITY_MASK=$mask
+    export TRITON_CACHE_DIR=/tmp/tc_${JT} SYCL_CACHE_DIR=/tmp/sc_${JT}
+    mkdir -p "$TRITON_CACHE_DIR" "$SYCL_CACHE_DIR"
+    echo "[engine $r] tiles=$mask port=$port"
+    KVBYTES=$(( KVGIB * 1073741824 ))
+    "$VLLM" serve "$MODEL" \
+      --tensor-parallel-size "$TPE" \
+      --max-model-len "$MML" --max-num-seqs "$MNS" \
+      --gpu-memory-utilization "$MEMUTIL" --kv-cache-memory-bytes "$KVBYTES" \
+      --enforce-eager --served-model-name "$SERVED_NAME" \
+      --enable-auto-tool-choice --tool-call-parser openai \
+      --host 127.0.0.1 --port "$port" \
+      > "$WORKDIR/logs/engine_r${r}.out" 2>&1
+  ) &
+  pids+=($!)
+  sleep 15   # stagger engine starts to avoid Triton JIT contention
+done
+
+# ── wait until all engines are healthy ──────────────────────────────────────
+echo "waiting for engines..."
+for b in "${backends[@]}"; do
+  for _ in $(seq 1 90); do
+    curl -sf "$b/health" >/dev/null 2>&1 && { echo "  ready: $b"; break; }
+    sleep 10
+  done
+done
+
+# ── start load balancer (binds all interfaces) ──────────────────────────────
+LB_PY=$GPTOSS/build-vllm-xpu/opus4.8-new_campaign/serve/lb.py
+"$FWPY" "$LB_PY" --host 0.0.0.0 --port "$LB_PORT" \
+  --backends "${backends[@]}" > "$WORKDIR/logs/lb.out" 2>&1 &
+LB_PID=$!
+sleep 3
+
+# ── write ENDPOINT.txt ───────────────────────────────────────────────────────
+cat > "$WORKDIR/ENDPOINT.txt" <<EOF
+node=$NODE
+ip=$NODE_IP
+lb_url=http://$NODE_IP:$LB_PORT/v1
+model=$SERVED_NAME
+job=$PBS_JOBID
+started=$(date -Is)
+nrep=$NREP
+tpe=$TPE
+mml=$MML
+mns=$MNS
+EOF
+echo "ENDPOINT: http://$NODE_IP:$LB_PORT/v1"
+cat "$WORKDIR/ENDPOINT.txt"
+echo
+echo "To reach the API externally, run on a login node:"
+echo "  bash $WORKDIR/uan_tunnel.sh $WORKDIR/ENDPOINT.txt"
+
+# ── keep alive until walltime, STOP file, or all engines die ────────────────
+while :; do
+  sleep 60
+  [ -f "$WORKDIR/STOP" ] && { echo "$(date -Is) STOP file; shutting down"; break; }
+  live=0; for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && live=$((live+1)); done
+  [ "$live" -eq 0 ] && { echo "$(date -Is) all engines exited"; break; }
+done
+
+kill "$LB_PID" 2>/dev/null
+for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+echo "$(date -Is) serve job $PBS_JOBID exiting"

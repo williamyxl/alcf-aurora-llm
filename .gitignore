@@ -195,3 +195,17 @@ nemotron/serve-llamacpp-n4/*
 nemotron/serve-llamacpp-n4/logs/
 !nemotron/serve-llamacpp-n4/single_bench_debug.pbs
 !nemotron/serve-llamacpp-n4/dp_bench_debug.pbs
+
+# ---- api_serve_high_concurrency (gpt-oss-120b high-concurrency API) ----
+!api_serve_high_concurrency/
+api_serve_high_concurrency/*
+api_serve_high_concurrency/logs/
+api_serve_high_concurrency/__pycache__/
+api_serve_high_concurrency/ENDPOINT.txt
+api_serve_high_concurrency/STOP
+!api_serve_high_concurrency/RECIPE.md
+!api_serve_high_concurrency/README.md
+!api_serve_high_concurrency/serve_gptoss_capacity.pbs
+!api_serve_high_concurrency/download_tiktoken_cache.sh
+!api_serve_high_concurrency/uan_tunnel.sh
+!api_serve_high_concurrency/client_example.py
