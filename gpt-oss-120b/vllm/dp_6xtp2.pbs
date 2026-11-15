@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-dp6
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD gpt-oss-120b/vllm/dp_6xtp2.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# MXFP4, 6 x TP2 data-parallel on 12 tiles: 11860 tok/s, 92.7 req/s at 128-way per engine (eager).  3xTP4 gives 6849 tok/s.
+NREP=${NREP:-6} TPE=${TPE:-2} KVGIB=20 common/vllm/run_dp.sh gptoss_dp "$MODELS/gpt-oss-120b/mxfp4-hf" \
+  --max-model-len 4096 --max-num-seqs 128 --num-prompts 512 --max-tokens 128 --gpu-mem-util 0.85

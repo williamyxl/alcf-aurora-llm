@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-ll-serve
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD gpt-oss-120b/llamacpp/serve_bench.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# llama-server (OpenAI API, continuous batching) + concurrency sweep. 1 tile MoE->CPU by default; NREP/TPE to scale.
+LLAMA=gptoss GGUF="$MODELS/gpt-oss-120b/mxfp4.gguf" SERVED=gpt-oss-120b MODE=${MODE:-offload} NREP=${NREP:-1} TPE=${TPE:-1} NPAR=${NPAR:-16} CTX=${CTX:-8192} \
+  LEVELS="${LEVELS:-1 4 8 16}" common/llamacpp/serve_bench.sh

@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:40:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-ll-batched
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD gpt-oss-120b/llamacpp/batched_bench.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# Aggregate throughput at NP parallel sequences (llama-batched-bench). MODE=gpu (2 tiles) or moecpu (1 tile).
+LLAMA=gptoss GGUF="$MODELS/gpt-oss-120b/mxfp4.gguf" BENCH=batched MODE=${MODE:-gpu} NTILES=2 NP=${NP:-64} CTX=${CTX:-8192} common/llamacpp/oneshot.sh 2>&1 | tee "$LOGS/gptoss_llama_batched.log"

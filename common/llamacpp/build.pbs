@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N llama-build
+#PBS -j oe
+# qsub -v REPO=$PWD,NAME=inkling,PR=25731,REF=368b24c35 common/llamacpp/build.pbs
+cd "${REPO:?pass -v REPO=<repo root>}"
+bash common/llamacpp/build.sh

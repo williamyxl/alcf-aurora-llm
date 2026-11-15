@@ -1,0 +1,19 @@
+{
+ "num_hidden_layers": 6,
+ "layer_types": [
+  "sliding_attention",
+  "sliding_attention",
+  "sliding_attention",
+  "sliding_attention",
+  "sliding_attention",
+  "full_attention"
+ ],
+ "mlp_layer_types": [
+  "dense",
+  "dense",
+  "dense",
+  "sparse",
+  "sparse",
+  "sparse"
+ ]
+}

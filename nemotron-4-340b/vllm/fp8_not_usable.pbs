@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N n4-vllm-fp8
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD nemotron-4-340b/vllm/fp8_not_usable.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# FP8-Dynamic (350 GB), TP8, eager: scheduler works (10.0 tok/s single, 381 tok/s at 64-way) but OUTPUT IS GARBAGE (FP8 broken on PVC).
+# XPU graph is not usable here: capture warmup over 96 layers hits the 30 min dist-init timeout.
+common/vllm/run_bench.sh n4_fp8 "$MODELS/nemotron-4-340b/fp8-hf" 8 --tp 8 --max-model-len 2048 --mns 64 --kv-gib 6 --no-chat --eager --nprompts 128

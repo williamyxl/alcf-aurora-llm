@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N muse-arch
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD muse-spark-open/vllm/arch_probe_dummy.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# STATUS: BLOCKED (does not serve). Architecture probe: 4 layers, DUMMY weights. Config + class resolve (TransformersMultiModalMoEForCausalLM);
+# the reduced model still runs out of XPU memory on one node (202k vocab, hidden 8192, multimodal). BF16 is 1.5 TB; needs several nodes.
+OVERLAY_TF=1 common/vllm/run_bench.sh muse_dummy "$MODELS/muse-spark-open/bf16-hf" 8 --tp 8 --max-model-len 4096 --mns 64 --nprompts 128 --kv-gib 6 --mem-util 0.6 \
+  --load-format dummy --hf-overrides @"$PWD"/muse-spark-open/vllm/dummy_4layers.json --no-chat --eager

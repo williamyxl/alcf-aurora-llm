@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N laguna-fp8
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD laguna-s-2.1/vllm/fp8_not_recommended.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# FP8 (131 GB): loads and generates, but 2.84 tok/s single / 129.5 tok/s conc (5x slower than BF16): the XPU FP8 MoE path is not accelerated.
+XPUGRAPH=${XPUGRAPH:-0} common/vllm/run_bench.sh laguna_fp8 "$MODELS/laguna-s-2.1/fp8-hf" 8 --tp 8 --max-model-len 8192 --mns 128 --kv-gib 12 --eager

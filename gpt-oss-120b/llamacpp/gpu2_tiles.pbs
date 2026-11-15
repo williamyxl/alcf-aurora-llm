@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:40:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-gpu2
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD gpt-oss-120b/llamacpp/gpu2_tiles.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# 2-tile pure GPU, layer split: ~30 tok/s decode; better prefill than F4_hbm.
+LLAMA=gptoss GGUF="$MODELS/gpt-oss-120b/mxfp4.gguf" MODE=gpu NTILES=2 CTX=${CTX:-4096} common/llamacpp/oneshot.sh 2>&1 | tee "$LOGS/gptoss_llama_gpu2.log"

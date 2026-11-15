@@ -1,0 +1,25 @@
+diff --git a/csrc/moe/moe_gather.cpp b/csrc/moe/moe_gather.cpp
+index 1a0275d..b5979b5 100644
+--- a/csrc/moe/moe_gather.cpp
++++ b/csrc/moe/moe_gather.cpp
+@@ -138,6 +138,7 @@ void MoeGatherLauncher(
+       CASE_TOPK(7, ElemsPerItem)                                               \
+       CASE_TOPK(8, ElemsPerItem)                                               \
+       CASE_TOPK(10, ElemsPerItem)                                              \
++      CASE_TOPK(22, ElemsPerItem)                                              \
+       default:                                                                 \
+         TORCH_CHECK(false, "error: not support TOPK=" + std::to_string(TOPK)); \
+     }                                                                          \
+diff --git a/csrc/moe/remap_hidden_states.cpp b/csrc/moe/remap_hidden_states.cpp
+index a6b0114..ac79ff8 100644
+--- a/csrc/moe/remap_hidden_states.cpp
++++ b/csrc/moe/remap_hidden_states.cpp
+@@ -530,6 +530,8 @@ void remap_hidden_states(
+     LAUNCH_REMAP_HIDDEN_STATES(TA, TS, 8);              \
+   } else if (TopK == 10) {                              \
+     LAUNCH_REMAP_HIDDEN_STATES(TA, TS, 10);             \
++  } else if (TopK == 22) {                              \
++    LAUNCH_REMAP_HIDDEN_STATES(TA, TS, 22);             \
+   } else {                                              \
+     throw std::runtime_error("Unsupported TopK value"); \
+   }

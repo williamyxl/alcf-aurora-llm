@@ -1,0 +1,17 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N beam-arch
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD beam-1.0/vllm/arch_probe_dummy.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# STATUS: BLOCKED (does not serve). Architecture probe: 6 layers, DUMMY weights (--load-format dummy), tests model-class build on XPU.
+# Config + class resolve with OVERLAY_TF=1 (transformers 5.23 + rope shim) -> TransformersMoEForCausalLM; the worker model build still
+# hits a None rope entry (Beam's full-attention layers use no RoPE). BF16 (934 GB) also exceeds one node's 768 GB HBM.
+OVERLAY_TF=1 common/vllm/run_bench.sh beam_dummy "$MODELS/beam-1.0/bf16-hf" 8 --tp 8 --max-model-len 4096 --mns 64 --nprompts 128 --kv-gib 6 \
+  --load-format dummy --hf-overrides @"$PWD"/beam-1.0/vllm/dummy_6layers.json --no-chat --eager

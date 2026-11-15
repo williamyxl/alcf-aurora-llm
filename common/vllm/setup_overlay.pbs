@@ -1,0 +1,11 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N overlay-kernels
+#PBS -j oe
+# qsub -v REPO=$PWD common/vllm/setup_overlay.pbs
+cd "${REPO:?pass -v REPO=<repo root>}"
+JOBS=48 bash common/vllm/setup_overlay.sh kernels

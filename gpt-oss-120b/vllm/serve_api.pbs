@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=24:00:00
+#PBS -q capacity
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N gptoss-api
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD gpt-oss-120b/vllm/serve_api.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# OpenAI-compatible endpoint, 6 x TP2 behind a load balancer. Endpoint -> logs/ENDPOINT.txt ; tunnel: common/serve/uan_tunnel.sh
+# Needs the harmony tiktoken cache once:  bash common/serve/download_tiktoken_cache.sh  (login node)
+MODEL="$MODELS/gpt-oss-120b/mxfp4-hf" SERVED_NAME=gpt-oss-120b NREP=${NREP:-6} TPE=${TPE:-2} MML=${MML:-8192} MNS=128 KVGIB=${KVGIB:-12} \
+EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser openai" common/vllm/serve_api.sh

@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ultra-ll-dp3
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD nemotron-3-ultra/llamacpp/dp3_fullxpu.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# 3 x 4-tile llama-server full-XPU data parallel behind lb.py: 12.9 / 13.9 / 15.7 tok/s aggregate at c=1/4/8 (0.13 req/s).
+source common/lib.sh; GGUF="$(first_shard "$MODELS/nemotron-3-ultra/UD-IQ2_M-gguf")"
+LLAMA=inkling GGUF="$GGUF" SERVED=nemotron-3-ultra MODE=fullxpu NREP=3 TPE=4 NPAR=8 NTHREADS=16 CTX=4096 LEVELS="1 4 8" common/llamacpp/serve_bench.sh

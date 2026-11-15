@@ -1,26 +1,12 @@
-# Inkling — llama.cpp SYCL on Aurora
+# Inkling (Thinking Machines, ~975B MoE / ~41B active)
 
-**Quant:** Unsloth UD-IQ1_S (~270 GB). **Queues:** debug / debug-scaling only.  
-**Metrics every run:** TTFT_ms, prefill_tps, gen_tps (+ quality).
+llama.cpp only. vLLM does not work, for two reasons: only GGUF weights are local (vLLM 0.26.1 has no GGUF loader), and vLLM's Inkling model code (`vllm/models/inkling/nvidia`) is written for NVIDIA (CUTLASS / FA4 attention, NVLink all-reduce); the `amd` variant needs ROCm's `aiter`. There is no XPU branch, so a build would not fix it.
 
-## Order (mandatory)
-1. Short ctx: **min pure-GPU tiles** → **scale to 12 tiles** → **min MoE→CPU tiles** (no offload scale)
-2. Max ctx: same three steps
-3. gpt-oss knobs: `VMM=0`, pure GPU `-sm tensor -fa on` even `-ts`, MoE `-ncmoe 99` + sock0 HBM `--preferred=2`
+| Recipe | Result |
+|---|---|
+| `llamacpp/serve_12tile.pbs` : UD-IQ1_S, 12 tiles pure GPU, layer split | 6.6 tok/s decode single-stream; batched-bench 15.3 tok/s aggregate at 64 sequences, **17.1 at 128** |
+| `llamacpp/serve_api.pbs` : llama-server over 12 tiles | OpenAI endpoint (untimed here) |
+| `llamacpp/RPC_MULTINODE.md` | multi-node over ggml-rpc (build with `RPC=1`) |
 
-## Paths
-- Models: `models/unsloth-Inkling-GGUF/UD-IQ1_S/…-00001-of-00007.gguf`
-- Build: `build-llamacpp-sycl/build/bin/`
-- Ledger: `build-llamacpp-sycl/CYCLE_LOG.md`
-- Finetune plan: [`FINETUNE_PLAN.md`](FINETUNE_PLAN.md) (draft; GGUF is infer-only — needs HF weights)
-
-## Submit helpers
-```bash
-qsub download_inkling_ud_iq1_s.pbs
-qsub build_llamacpp_sycl.pbs
-qsub -v CYCLE=PG1 -N ll-PG1 -o build-llamacpp-sycl/logs/perf_PG1.out bench_llamacpp_sycl_perf.pbs
-bash build-llamacpp-sycl/harvest_once.sh          # status
-bash build-llamacpp-sycl/harvest_once.sh --submit # next cycle
-```
-
-No login-node long monitors.
+Needs the `inkling` llama.cpp build (PR 25731). Setup: `bash inkling/download_gguf.sh` (UD-IQ1_S, ~250 GB).
+`training/` is a July 2026 LoRA/FSDP smoke test that no longer reproduces (see its README).

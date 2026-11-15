@@ -1,0 +1,16 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ink-ll-serve
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD inkling/llamacpp/serve_12tile.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# UD-IQ1_S, 12 tiles pure GPU (layer split): 6.6 tok/s decode single-stream; batched-bench 15.3 tok/s agg @64, 17.1 @128.
+source common/lib.sh; GGUF="$(first_shard "$MODELS/inkling/UD-IQ1_S-gguf")"
+LLAMA=inkling GGUF="$GGUF" MODE=gpu NTILES=12 BENCH=completion CTX=4096 common/llamacpp/oneshot.sh 2>&1 | tee "$LOGS/inkling_single.log"
+for NP in 64 128; do CTX=$((NP==64 ? 16384 : 32768)); LLAMA=inkling GGUF="$GGUF" MODE=gpu NTILES=12 BENCH=batched NP=$NP CTX=$CTX common/llamacpp/oneshot.sh 2>&1 | tail -8 | tee -a "$LOGS/inkling_batched.log"; done
