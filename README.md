@@ -23,6 +23,31 @@ What produced the gains (details in [`docs/ENGINES.md`](docs/ENGINES.md)):
 - **A rebuilt `_moe_C` kernel** (top-k 22) is what lets vLLM run Nemotron-3-Ultra.
 - **Avoid FP8 on PVC**: slower (Laguna, ~5x) or wrong (Nemotron-4).
 
+## August vs November 2026
+
+Same model paired where both periods measured it. Single-stream = one request at a time; high concurrency = aggregate generation tok/s under load. Layouts differ for some concurrency pairs (see notes). N/A = not measured with that metric. Chart: `docs/figures/then_vs_now.png`. Table and chart come from the same data in `common/tools/plot_then_vs_now.py` (regenerate both with `python3 common/tools/plot_then_vs_now.py --readme`).
+
+<!-- then-vs-now:start -->
+| Model — engine, layout | Prefill tok/s (Aug / Nov) | Generation tok/s (Aug / Nov) | TTFT ms (Aug / Nov) | High-concurrency gen tok/s (Aug / Nov) |
+|---|---:|---:|---:|---:|
+| gpt-oss-120b MXFP4 — llama.cpp, 1 tile MoE->CPU | 41.4 / 48.6 | 41.6 / 42.4 | 411 / N/A | 417 / 194 |
+| gpt-oss-120b MXFP4 — vLLM, 1 x TP4 eager | N/A / 1,977 | N/A / 26.3 | N/A / 44 | N/A / N/A |
+| gpt-oss-120b MXFP4 — vLLM, 1 x TP4 XPU graph | N/A / 2,887 | N/A / 60.0 | N/A / 30 | N/A / N/A |
+| gpt-oss-120b MXFP4 — vLLM, node-level data parallel | N/A / N/A | N/A / N/A | N/A / N/A | 4,565 / 11,860 |
+| Laguna S 2.1 BF16 — vLLM, TP8 XPU graph | N/A / 1,069 | N/A / 36.6 | N/A / 58 | N/A / 2,342 |
+| Nemotron-3-Ultra UD-IQ2_M — llama.cpp, 1 tile MoE->CPU | 11.9 / N/A | 7.1 / 7.8 | 2,670 / N/A | N/A / N/A |
+| Nemotron-3-Ultra UD-IQ2_M — llama.cpp, 3 x 4 tiles DP | N/A / N/A | N/A / N/A | N/A / N/A | 15.6 / 15.7 |
+| Nemotron-3-Ultra INT4 — vLLM, TP8 eager | N/A / 194 | N/A / 7.8 | N/A / 185 | N/A / 115 |
+| Nemotron-4-340B i1-Q4_K_M — llama.cpp, 6 tiles | 11.0 / N/A | 2.3 / 2.3 | 2,390 / 2,375 | 9.9 / 6.6 |
+| Inkling UD-IQ1_S — llama.cpp, 12 tiles | 8.7 / 6.2 | 6.7 / 6.6 | 2,300 / N/A | N/A / 17.1 |
+| Nemotron-4-340B FP8-Dynamic — vLLM, TP8 eager | N/A / N/A | N/A / N/A | N/A / N/A | N/A / N/A |
+<!-- then-vs-now:end -->
+
+Per-row sources are in the `DATA` list of that script. Notes:
+- **Same layout in both periods (a true pair):** Nemotron-3-Ultra llama.cpp 3×4-tile data-parallel, concurrency 15.6 → 15.7.
+- **Different layout or engine:** gpt-oss-120b node data-parallel (Aug 3×TP4 → Nov 6×TP2); gpt-oss llama.cpp (2 tiles both, different batch sizes); Nemotron-4-340B llama.cpp (3×4 → 2×6 tiles).
+- **Not reported:** Nemotron-4-340B FP8 on vLLM. The run completed, but its output is invalid, so every metric is N/A.
+
 ## Quick start
 ```bash
 git clone https://github.com/williamyxl/alcf-aurora-llm.git && cd alcf-aurora-llm
