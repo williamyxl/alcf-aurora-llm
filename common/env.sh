@@ -43,6 +43,9 @@ vllm_env() {
   export PYTHONPATH="$FW/lib/python3.12/site-packages:${PYTHONPATH:-}"
   # Fix 2: dummy torchcodec module to avoid broken native library in user's site-packages
   export PYTHONPATH="$REPO/dummy_torchcodec:$PYTHONPATH"
+  # Fix 3: framework triton needs TRITON_BACKENDS_IN_TREE=1 to discover intel backend from directory
+  export TRITON_BACKENDS_IN_TREE=1
+  export TRITON_INTEL_GPU_ARCH=xpu
 }
 # Compose PYTHONPATH from optional overlays:  OVERLAY_TF=1 (transformers 5.23 + Beam/Muse rope shim)
 #                                              OVERLAY_KERNELS=1 (vllm_xpu_kernels with top-k=22 _moe_C)
