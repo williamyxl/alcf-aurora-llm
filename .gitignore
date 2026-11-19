@@ -16,6 +16,12 @@
 !inkling/**
 !beam-1.0/**
 !muse-spark-open/**
+!nemotron-3-5-super-vl/
+!nemotron-3-5-super-vl/download_hf_w4a16.sh
+!nemotron-3-5-super-vl/download_gguf.sh
+!nemotron-3-5-super-vl/vllm/serve_int4_patched.pbs
+!nemotron-3-5-super-vl/llamacpp/single_tile_moecpu.pbs
+!nemotron-3-5-super-vl/llamacpp/dp3_fullxpu.pbs
  !nemotron-3-5-super-vl/
 
 # --- never track, wherever they appear ---
