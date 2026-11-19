@@ -16,6 +16,7 @@
 !inkling/**
 !beam-1.0/**
 !muse-spark-open/**
+ !nemotron-3-5-super-vl/
 
 # --- never track, wherever they appear ---
 data/

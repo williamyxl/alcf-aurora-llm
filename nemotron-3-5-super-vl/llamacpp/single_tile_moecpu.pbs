@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N ultra-3-5-super-ll-single
+#PBS -j oe
+# Submit from the repo root:   qsub -v REPO=$PWD nemotron-3-5-super-vl/llamacpp/single_tile_moecpu.pbs      (override queue: qsub -q debug-scaling ...)
+cd "${REPO:?pass -v REPO=<repo root>}"
+source common/env.sh
+# UD-IQ2_M, 1 tile, experts on CPU, continuous batching: 7.1 tok/s decode, TTFT 2.7 s; aggregate stays ~6-7 tok/s c=1..32 (CPU-bound).
+source common/lib.sh; GGUF="$(first_shard "$MODELS/nemotron-3-5-super-vl/UD-IQ2_M-gguf")"
+LLAMA=inkling GGUF="$GGUF" SERVED=nemotron-3-5-super-vl MODE=offload NREP=1 TPE=1 NPAR=32 NTHREADS=64 CTX=8192 LEVELS="1 4 8 16 32" common/llamacpp/serve_bench.sh
