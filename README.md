@@ -12,7 +12,7 @@ Measured 2026-07 to 2026-11 on the `debug` / `debug-scaling` queues. "Conc" = ag
 | [gpt-oss-120b](gpt-oss-120b/) MXFP4 | 6 x TP2 data parallel; 1 x TP4 + XPU graph | **11860 tok/s conc** (92.7 req/s); **60.0 tok/s** single | 1 tile, MoE on CPU | **42.4 tok/s** single |
 | [Laguna S 2.1](laguna-s-2.1/) BF16 | TP8 + XPU graph | **2342 tok/s conc** (18.3 req/s); **36.6 tok/s** single | not tried | |
 | [Nemotron-3-Ultra](nemotron-3-ultra/) 550B | INT4, TP8, patched top-k=22 kernel | 115 tok/s at 16-way; 7.8 single | 3 x 4 tiles full-XPU | 15.7 tok/s at 8-way; 7.1 single (1 tile) |
-| [Nemotron-4-340B](nemotron-4-340b/) dense | FP8 runs but **output is garbage** | not usable | 2 x 6 tiles | 6.6 tok/s at 8-way; 2.4 single |
+| [Nemotron-4-340B](nemotron-4-340b/) dense | BF16 = 1 TB, **does not fit one node** (768 GB HBM); FP8 runs but **output is garbage** | not usable | 2 x 6 tiles | 6.6 tok/s at 8-way; 2.4 single |
 | [Inkling](inkling/) ~975B | not supported (NVIDIA-only model code, GGUF-only weights) | n/a | 12 tiles pure GPU | 17.1 tok/s at 128 seq; 6.6 single |
 | [Beam 1.0](beam-1.0/) 501B | **blocked** (model build, memory) | n/a | no arch | |
 | [Muse Spark Open](muse-spark-open/) 816B | **blocked** (memory; 1.5 TB BF16) | n/a | no arch | |
@@ -93,5 +93,6 @@ Rebuild what is not in git:
 - llama.cpp results come from builds made before `frameworks/2026.1.0`; they were rerun unchanged and match the earlier campaign.
 - Each configuration was measured once (no error bars).
 - Beam, Muse Spark and Inkling cannot be served by vLLM here; upstream vLLM/llama.cpp `main` have newer support not present in the installed module.
+- Nemotron-4-340B BF16 (~1 TB) does not fit one Aurora node's 768 GB HBM; downloading it would not enable vLLM without multi-node, which is not set up. Only FP8 (garbage output) and GGUF (llama.cpp only) were tested locally.
 
 Remote: https://github.com/williamyxl/alcf-aurora-llm

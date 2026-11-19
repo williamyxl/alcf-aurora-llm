@@ -11,6 +11,8 @@ Dense, so there is no MoE to offload: every token costs full 340B FLOPs. Only th
 An earlier llama.cpp run of 3 x 4 tiles reached ~9.9 tok/s aggregate (`llamacpp/MEASUREMENTS.md`); that layout was not rerun.
 Single server with `--parallel 1` serialises requests (TTFT 87 s at 4 concurrent), so use `NPAR=8` for concurrency.
 
-The vLLM FP8 run proves the scheduler and the dense Nemotron path work on XPU (and batches 64 sequences), but the FP8 kernels return nonsense text on PVC. XPU graph is not usable for this model: capture over 96 layers hits the 30-minute distributed-init timeout. A BF16 or INT4 vLLM checkpoint was not tried.
+The vLLM FP8 run proves the scheduler and the dense Nemotron path work on XPU (and batches 64 sequences), but the FP8 kernels return nonsense text on PVC. XPU graph is not usable for this model: capture over 96 layers hits the 30-minute distributed-init timeout.
+
+**vLLM BF16 was not tested: BF16 Nemotron-4-340B is ~1 TB, which does not fit one Aurora node's 768 GB HBM.** Downloading BF16 weights (~1 TB) would not help without multi-node vLLM, which is not set up in this repo. A BF16 or INT4 vLLM checkpoint was not tried.
 
 Setup: `bash nemotron-4-340b/download_gguf.sh` (streams and assembles a multipart GGUF, ~196 GB; needs ~one part of spare space).

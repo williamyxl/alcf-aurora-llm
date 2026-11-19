@@ -39,6 +39,10 @@ vllm_env() {
   fi
   export FWROOT FWPY="$FWROOT/bin/python" VLLM_BIN="$FWROOT/bin/vllm"
   export HF_HUB_OFFLINE=1 TMPDIR=/tmp ZE_FLAT_DEVICE_HIERARCHY=FLAT
+  # Fix 1: framework triton has intel backend; user's triton (if installed) shadows it and lacks intel backend
+  export PYTHONPATH="$FW/lib/python3.12/site-packages:${PYTHONPATH:-}"
+  # Fix 2: dummy torchcodec module to avoid broken native library in user's site-packages
+  export PYTHONPATH="$REPO/dummy_torchcodec:$PYTHONPATH"
 }
 # Compose PYTHONPATH from optional overlays:  OVERLAY_TF=1 (transformers 5.23 + Beam/Muse rope shim)
 #                                              OVERLAY_KERNELS=1 (vllm_xpu_kernels with top-k=22 _moe_C)
