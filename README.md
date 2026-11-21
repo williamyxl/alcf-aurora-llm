@@ -10,7 +10,7 @@ Measured 2026-07 to 2026-11 on the `debug` / `debug-scaling` queues. "Conc" = ag
 | Model | Best vLLM recipe | vLLM result | Best llama.cpp recipe | llama.cpp result |
 |---|---|---|---|---|
 | [gpt-oss-120b](gpt-oss-120b/) MXFP4 | 6 x TP2 data parallel; 1 x TP4 + XPU graph | **11860 tok/s conc** (92.7 req/s); **60.0 tok/s** single | 1 tile, MoE on CPU | **42.4 tok/s** single |
-| [Laguna S 2.1](laguna-s-2.1/) BF16 | TP8 + XPU graph | **2342 tok/s conc** (18.3 req/s); **36.6 tok/s** single | not tried | |
+| [Laguna S 2.1](laguna-s-2.1/) BF16 | TP8 + XPU graph; eager re-verified 2026-11-21 ([`RUN_LAGUNA.md`](laguna-s-2.1/vllm/RUN_LAGUNA.md)) | **2342 tok/s conc** (18.3 req/s); **36.6 tok/s** single (graph). Eager: 1350 tok/s conc, 14.3 single | not tried | |
 | [Nemotron-3-Ultra](nemotron-3-ultra/) 550B | INT4, TP8, patched top-k=22 kernel | 115 tok/s at 16-way; 7.8 single | 3 x 4 tiles full-XPU | 15.7 tok/s at 8-way; 7.1 single (1 tile) |
 | [Nemotron 3.5 Super VL](nemotron-3-5-super-vl/) 8B | INT4, TP8, patched top-k=22 kernel | 7.8 tok/s single, 115 tok/s at 16-way, quality OK | 3 x 4 tiles full-XPU | 12.9 / 13.9 / 15.7 tok/s at c=1/4/8; 7.1 single (1 tile) |
 | [Nemotron-4-340B](nemotron-4-340b/) dense | BF16 = 1 TB, **does not fit one node** (768 GB HBM); FP8 runs but **output is garbage** | not usable | 2 x 6 tiles | 6.6 tok/s at 8-way; 2.4 single |
@@ -68,9 +68,10 @@ common/
                         serve_conc.py, bench_single.py, bench_conc.py, setup_overlay.sh (transformers 5.23 + top-k22 kernel), kernels/topk22.patch
   llamacpp/             build.sh (SYCL build), oneshot.sh (single-stream / batched-bench), serve_bench.sh (llama-server + load test)
   serve/                lb.py (round-robin LB), bench_client.py, client_example.py, uan_tunnel.sh, download_tiktoken_cache.sh
-  tools/                hf_download.sh (resumable), plot_gptoss_serving.py
+  tools/                hf_download.sh (resumable), plot_gptoss_serving.py, plot_then_vs_now.py
 <model>/                gpt-oss-120b  laguna-s-2.1  nemotron-3-ultra  nemotron-4-340b  inkling  beam-1.0  muse-spark-open
   README.md             what runs, measured numbers, caveats
+  vllm/RUN_*.md         step-by-step run notes where a model needed debugging (laguna-s-2.1: RUN_LAGUNA.md, ROOT_CAUSE_triton_shadowing.md)
   download*.sh          checkpoint download (login node)
   llamacpp/*.pbs        llama.cpp recipes + MEASUREMENTS.md (imported campaign notes)
   vllm/*.pbs            vLLM recipes
@@ -88,6 +89,11 @@ Rebuild what is not in git:
 - **llama.cpp**: `qsub -v REPO=$PWD,NAME=gptoss,REF=9d57ce4 common/llamacpp/build.pbs` and `NAME=inkling,PR=25731,REF=368b24c35` (see `docs/ENGINES.md`).
 - **Weights**: each model's `download*.sh`. Nothing downloads on its own.
 - `opt-125m` (the smoke test model) is a plain Hugging Face download: `common/tools/hf_download.sh facebook/opt-125m $DATA/store/opt-125m`, then `ln -s ../../store/opt-125m $DATA/models/opt-125m/fp16-hf` after `mkdir -p $DATA/models/opt-125m`.
+
+## Troubleshooting
+- **vLLM fails with `0 active drivers`, `Cannot find a working triton installation`, or `No module named 'triton.backends.intel'`.** `module load frameworks/2026.1.0` sets `PYTHONUSERBASE=~/.local/aurora/frameworks/2026.1.0`. A pip-installed `triton` (or `torchcodec`) there shadows the framework's `triton_xpu` and has no Intel backend. `common/env.sh` `vllm_env` now sets `PYTHONNOUSERSITE=1` and unsets `PYTHONUSERBASE`, so every recipe that sources it is protected. Custom launchers must do the same. Check with `PYTHONNOUSERSITE=1 python -c "import triton; print(triton.__version__, triton.__file__)"` on a compute node (expect 3.7.2 under `/opt/aurora/`). Do not work around it with `PYTHONPATH`, `sitecustomize.py`, or a dummy `vllm` package. Details: [`laguna-s-2.1/vllm/ROOT_CAUSE_triton_shadowing.md`](laguna-s-2.1/vllm/ROOT_CAUSE_triton_shadowing.md).
+- **`libpti_view.so.0: cannot open shared object file`.** The frameworks module was not loaded; call `vllm_env` (or `module load frameworks/2026.1.0`) before starting `vllm`.
+- **Eager runs must pass `--enforce-eager`** (`serve_conc.py --eager`, or `EAGER_FLAG=--enforce-eager` for `serve_api.sh`); otherwise vLLM uses the inductor/compile path.
 
 ## Known limits
 - Only gpt-oss-120b reaches thousands of tok/s. The others are single-node, memory-bound or CPU-bound; numbers are in each README.

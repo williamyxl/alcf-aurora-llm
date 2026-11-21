@@ -47,5 +47,6 @@ The earlier self-built Torch 2.10 + IPEX + vLLM stack (July 2026) never ran vLLM
 ## Hardware facts that shape every recipe
 - One Aurora node: 6 GPUs x 2 tiles = 12 tiles, 64 GB HBM each (768 GB), 2 sockets. Set `ZE_FLAT_DEVICE_HIERARCHY=FLAT` and pin tiles with `ZE_AFFINITY_MASK`.
 - PVC has no native FP4, and the XPU FP8 MoE path is both slow and (for Nemotron-4) wrong. Working precisions here: MXFP4 (gpt-oss only), BF16, INT4 weight-only.
+- `common/env.sh` sets `PYTHONNOUSERSITE=1` and unsets `PYTHONUSERBASE` after loading the frameworks module. Otherwise a pip-installed triton in `~/.local/aurora/frameworks/*` shadows the framework's `triton_xpu` (see the README Troubleshooting section).
 - Compute nodes need `proxy.alcf.anl.gov:3128` for any download; do downloads on a login node.
 - Queues used: `debug` and `debug-scaling` (1 h cap, one running plus one queued job per user per queue), `capacity` for long serving jobs. Always `-l filesystems=flare`, account `MatSciAI` (change in `common/env.local.sh`).
