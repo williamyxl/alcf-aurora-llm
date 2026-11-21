@@ -13,6 +13,9 @@ Second model, after gpt-oss-120b, that serves at high concurrency on Aurora with
 
 Model load takes ~13 min (219 GB read from Lustre). A 6k-token prompt prefilled at 5135 tok/s (eager run). OpenAI endpoint: `vllm/serve_api.pbs`.
 
+## Eager recipe: verified working again after the triton-shadowing fix
+See `vllm/RUN_LAGUNA.md` (re-verified 2026-11-20/21: 14.3 tok/s single stream, 1350 tok/s at 128-way). If a vLLM job fails with `0 active drivers` or `Cannot find a working triton installation`, a pip-installed triton in `~/.local/aurora/frameworks/*` is shadowing the framework one; `common/env.sh` now sets `PYTHONNOUSERSITE=1` to avoid that. Details: `vllm/ROOT_CAUSE_triton_shadowing.md`.
+
 ## Setup
 `bash laguna-s-2.1/download.sh` (login node, 219 GB), then `qsub -v REPO=$PWD laguna-s-2.1/vllm/serve_conc_graph.pbs`. No overlays needed.
 

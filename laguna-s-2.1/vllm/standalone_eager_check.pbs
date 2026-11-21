@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:59:00
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -N laguna-verify
+#PBS -j oe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm/logs/standalone_eager_check.out
+REPO=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm
+cd $REPO
+module use /soft/modulefiles
+module load frameworks/2026.1.0
+FWROOT=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
+export PYTHONNOUSERSITE=1
+unset PYTHONUSERBASE
+export PYTHONPATH=
+export HF_HUB_OFFLINE=1 TMPDIR=/tmp ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0,1,2,3,4,5,6,7
+export TRITON_CACHE_DIR=/tmp/tc_$PBS_JOBID SYCL_CACHE_DIR=/tmp/sc_$PBS_JOBID; mkdir -p $TRITON_CACHE_DIR $SYCL_CACHE_DIR
+echo "host=$(hostname) $(date -Is)"
+$FWROOT/bin/python -c "import torchcodec" 2>&1 | tail -1
+$FWROOT/bin/python $REPO/common/vllm/serve_conc.py --model $REPO/data/models/laguna-s-2.1/bf16-hf --tag laguna_verify \
+  --tp 8 --max-model-len 8192 --mns 128 --kv-gib 12 --eager --nprompts 128 > $REPO/logs/laguna_verify.log 2>&1
+echo "rc=$? $(date -Is)"
+grep -hE "QUALITY_TEXT=|^SINGLE |SERVE_JSON=" $REPO/logs/laguna_verify.log | cut -c1-900

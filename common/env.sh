@@ -39,13 +39,10 @@ vllm_env() {
   fi
   export FWROOT FWPY="$FWROOT/bin/python" VLLM_BIN="$FWROOT/bin/vllm"
   export HF_HUB_OFFLINE=1 TMPDIR=/tmp ZE_FLAT_DEVICE_HIERARCHY=FLAT
-  # Fix 1: framework triton has intel backend; user's triton (if installed) shadows it and lacks intel backend
-  export PYTHONPATH="$FW/lib/python3.12/site-packages:${PYTHONPATH:-}"
-  # Fix 2: dummy torchcodec module to avoid broken native library in user's site-packages
-  export PYTHONPATH="$REPO/dummy_torchcodec:$PYTHONPATH"
-  # Fix 3: framework triton needs TRITON_BACKENDS_IN_TREE=1 to discover intel backend from directory
-  export TRITON_BACKENDS_IN_TREE=1
-  export TRITON_INTEL_GPU_ARCH=xpu
+  # The frameworks module sets PYTHONUSERBASE=~/.local/aurora/frameworks/<ver>. A pip-installed triton/torchcodec there
+  # shadows the framework's triton_xpu (no intel backend -> "0 active drivers"). Ignore the user site entirely.
+  export PYTHONNOUSERSITE=1
+  unset PYTHONUSERBASE
 }
 # Compose PYTHONPATH from optional overlays:  OVERLAY_TF=1 (transformers 5.23 + Beam/Muse rope shim)
 #                                              OVERLAY_KERNELS=1 (vllm_xpu_kernels with top-k=22 _moe_C)
