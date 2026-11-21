@@ -10,7 +10,7 @@ Measured 2026-07 to 2026-11 on the `debug` / `debug-scaling` queues. "Conc" = ag
 | Model | Best vLLM recipe | vLLM result | Best llama.cpp recipe | llama.cpp result |
 |---|---|---|---|---|
 | [gpt-oss-120b](gpt-oss-120b/) MXFP4 | 6 x TP2 data parallel; 1 x TP4 + XPU graph | **11860 tok/s conc** (92.7 req/s); **60.0 tok/s** single | 1 tile, MoE on CPU | **42.4 tok/s** single |
-| [Laguna S 2.1](laguna-s-2.1/) BF16 | TP8 + XPU graph; eager re-verified 2026-11-21 ([`RUN_LAGUNA.md`](laguna-s-2.1/vllm/RUN_LAGUNA.md)) | **2342 tok/s conc** (18.3 req/s); **36.6 tok/s** single (graph). Eager: 1350 tok/s conc, 14.3 single | not tried | |
+| [Laguna S 2.1](laguna-s-2.1/) BF16 | TP8 + XPU graph; graph and eager both re-verified 2026-11-21 ([`RUN_LAGUNA.md`](laguna-s-2.1/vllm/RUN_LAGUNA.md)) | **2342 tok/s conc** (18.3 req/s); **36.6 tok/s** single (graph). Eager: 1350 tok/s conc, 14.3 single | not tried | |
 | [Nemotron-3-Ultra](nemotron-3-ultra/) 550B | INT4, TP8, patched top-k=22 kernel | 115 tok/s at 16-way; 7.8 single | 3 x 4 tiles full-XPU | 15.7 tok/s at 8-way; 7.1 single (1 tile) |
 | [Nemotron 3.5 Super VL](nemotron-3-5-super-vl/) 8B | INT4, TP8, patched top-k=22 kernel | 7.8 tok/s single, 115 tok/s at 16-way, quality OK | 3 x 4 tiles full-XPU | 12.9 / 13.9 / 15.7 tok/s at c=1/4/8; 7.1 single (1 tile) |
 | [Nemotron-4-340B](nemotron-4-340b/) dense | BF16 = 1 TB, **does not fit one node** (768 GB HBM); FP8 runs but **output is garbage** | not usable | 2 x 6 tiles | 6.6 tok/s at 8-way; 2.4 single |

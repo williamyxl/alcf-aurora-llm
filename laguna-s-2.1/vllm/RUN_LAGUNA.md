@@ -3,7 +3,12 @@
 Verified 2026-11-20/21 (jobs 9109893 standalone and 9110540 via serve_conc_eager.pbs, frameworks/2026.1.0, vLLM 0.26.1, triton_xpu 3.7.2): BF16, TP=8, eager.
 `ok=true`, quality OK, load 746 s, 14.3 tok/s single stream, 1350 tok/s at 128-way. These match the eager reference in the README.
 
-## Run
+## XPU-graph mode (fastest): also verified
+`qsub -v REPO=$PWD laguna-s-2.1/vllm/serve_conc_graph.pbs` (job 9110809, 2026-11-21, same env fix): `ok=true`, quality OK, 512/512 requests OK.
+Load 867 s (includes about 53 s compile and graph capture), 37.0 tok/s single stream (prefill 1084 tok/s), 2423 tok/s / 18.9 req/s at 128-way.
+This matches the README's 36.6 / 2342. TASK2's `RuntimeError: cancelled` was not reproduced in this offline-engine test, which did not use long prompts or HTTP concurrency.
+
+## Run (eager)
 ```bash
 cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/alcf-aurora-llm
 qsub -v REPO=$PWD laguna-s-2.1/vllm/serve_conc_eager.pbs                       # debug queue
@@ -50,5 +55,4 @@ Run these on a compute node (`qsub -I -q debug`); on a login node they can hang.
 
 ## Not verified
 - `vllm serve` (OpenAI API) via `serve_api.pbs`. This recipe uses the offline engine (same scheduler). The HTTP server has not been tested after the fix.
-- XPU-graph mode (`serve_conc_graph.pbs`, `serve_api.pbs`). The README reports 36.6 tok/s with it, but it has not been re-run after the env change. TASK2 saw `RuntimeError: cancelled` on long prompts in graph mode.
 - FP8 (`fp8_not_recommended.pbs`).
